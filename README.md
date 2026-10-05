@@ -21,18 +21,30 @@ installer/   Future Windows packaging
 
 ## Prerequisites (macOS)
 
-- Python 3.11+
+- **Python 3.11+** (required; macOS system Python 3.9.x will fail with a `requires-python` error). Install via Homebrew and use that interpreter for the venv:
+
+  ```bash
+  brew install python@3.12
+  ```
+
+  Confirm: `python3.12 --version` should report 3.12.x.
 - Node.js 20+ (npm)
 
 ## Backend (macOS)
 
+If you already created a venv with system Python 3.9, remove it and recreate with 3.12:
+
 ```bash
 cd backend
-python3 -m venv .venv
+rm -rf .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
+pip install -U pip
 pip install -e ".[dev]"
 uvicorn gheymatyar.main:app --reload --host 127.0.0.1 --port 8765
 ```
+
+Always upgrade pip before the editable install. Fresh setup is the same sequence (skip `rm -rf .venv` if there is no existing venv).
 
 Health check: [http://127.0.0.1:8765/api/health](http://127.0.0.1:8765/api/health) → `{"status":"ok"}`
 
