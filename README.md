@@ -30,6 +30,7 @@ installer/   Future Windows packaging
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
+pip install -U pip
 pip install -e ".[dev]"
 uvicorn gheymatyar.main:app --reload --host 127.0.0.1 --port 8765
 ```
