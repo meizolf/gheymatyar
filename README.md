@@ -4,10 +4,10 @@ Monorepo scaffold for the Pioneers Price Updater desktop-oriented app.
 
 - **Frontend:** React + TypeScript + Vite
 - **Backend:** Python + FastAPI (health API + typed domain models)
-- **Persistence:** not implemented yet (planned later: local SQLite)
+- **Persistence:** local SQLite via SQLAlchemy 2.x (repositories; no business orchestration yet)
 - **Target:** Windows exe later; local development on macOS
 
-No Docker, authentication, Excel/PDF processing, or database wiring in Steps 1–2.
+No Docker, authentication, Excel/PDF processing, matching, or price-update workflow yet.
 
 ## Repository layout
 
@@ -47,6 +47,20 @@ uvicorn gheymatyar.main:app --reload --host 127.0.0.1 --port 8765
 Always upgrade pip before the editable install. Fresh setup is the same sequence (skip `rm -rf .venv` if there is no existing venv).
 
 Health check: [http://127.0.0.1:8765/api/health](http://127.0.0.1:8765/api/health) → `{"status":"ok"}`
+
+### Persistence (SQLite)
+
+The backend includes a SQLAlchemy persistence layer under `gheymatyar.db` and repositories under `gheymatyar.repositories`. Domain models in `gheymatyar.domain` stay independent of ORM classes.
+
+**Database URL:** pass an explicit SQLite URL when constructing `Database` (for example `sqlite:////tmp/gheymatyar-dev.db`). Importing the package does **not** create a database file. The final Windows application-data path is deferred.
+
+**Transactions:** repositories accept a caller-owned session. Writes flush immediately; on any `SQLAlchemyError` (including constraint and statement/bind failures) the session is rolled back so it remains usable. Prefer `Database.session()` / `session_scope()` for commit-on-success / rollback-on-error scopes.
+
+**Money storage:** prices and percentages are stored as TEXT via a `DecimalAsText` type (not SQLite REAL / SQLAlchemy `Numeric`), so values such as `12345678901234.123456` round-trip exactly as `Decimal`. Non-finite values (`NaN`, infinity) and Python `float` inputs are rejected.
+
+**Foreign keys:** SQLite FK enforcement is enabled on every connection with `PRAGMA foreign_keys=ON`.
+
+**Tests:** use isolated temporary SQLite files (`tmp_path`); they never write to a developer’s real database.
 
 ### Backend tests
 
