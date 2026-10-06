@@ -3,11 +3,11 @@
 Monorepo scaffold for the Pioneers Price Updater desktop-oriented app.
 
 - **Frontend:** React + TypeScript + Vite
-- **Backend:** Python + FastAPI
-- **Database:** SQLite + SQLAlchemy (wired as dependencies; no business models yet)
+- **Backend:** Python + FastAPI (health API + typed domain models)
+- **Persistence:** not implemented yet (planned later: local SQLite)
 - **Target:** Windows exe later; local development on macOS
 
-No Docker, authentication, or Excel/PDF processing in this scaffold.
+No Docker, authentication, Excel/PDF processing, or database wiring in Steps 1–2.
 
 ## Repository layout
 
@@ -28,7 +28,7 @@ installer/   Future Windows packaging
   ```
 
   Confirm: `python3.12 --version` should report 3.12.x.
-- Node.js 20+ (npm)
+- Node.js `^20.19.0 || >=22.12.0` (npm; matches Vite’s engines field)
 
 ## Backend (macOS)
 
