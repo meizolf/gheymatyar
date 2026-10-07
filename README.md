@@ -7,14 +7,15 @@ Monorepo scaffold for the Pioneers Price Updater desktop-oriented app.
 - **Persistence:** local SQLite via SQLAlchemy 2.x (repositories; no business orchestration yet)
 - **Target:** Windows exe later; local development on macOS
 
-No Docker, authentication, Excel/PDF processing, matching, or price-update workflow yet.
+No Docker, authentication, PDF processing, matching, or price-update workflow yet. A read-only Pioneers Excel parser is available (no Excel writing yet).
 
 ## Repository layout
 
 ```
 backend/     FastAPI app (src/gheymatyar)
 frontend/    React + Vite UI
-fixtures/    Sample data placeholders
+fixtures/    Sample / anonymized fixtures (incl. Pioneers Excel)
+docs/        Workbook schema notes
 scripts/     Dev / build helper scripts
 installer/   Future Windows packaging
 ```
