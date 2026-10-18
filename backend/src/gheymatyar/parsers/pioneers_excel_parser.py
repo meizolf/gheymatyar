@@ -175,14 +175,50 @@ class PioneersExcelParser:
                 workbook.close()
 
     def _resolve_sheet(self, workbook: Any, source: Path) -> Worksheet:
-        if PRODUCT_SHEET_NAME in workbook.sheetnames:
-            return workbook[PRODUCT_SHEET_NAME]
+        """Select the product sheet from required headers, not from its title.
+
+        Production exports use ``لیست کالا``. A development sample may use
+        another title. Exactly one worksheet must contain the required headers.
+        """
+        matches: list[Worksheet] = []
+        for sheet_name in workbook.sheetnames:
+            worksheet = workbook[sheet_name]
+            if self._sheet_has_required_headers(worksheet):
+                matches.append(worksheet)
+        if len(matches) == 1:
+            return matches[0]
+        required = ", ".join(REQUIRED_HEADERS)
+        available = ", ".join(workbook.sheetnames) or "(none)"
+        if len(matches) > 1:
+            found = ", ".join(worksheet.title for worksheet in matches)
+            raise PioneersExcelError(
+                "More than one sheet matches the Pioneers product headers",
+                filename=source,
+                reason=(
+                    f"matching sheets: {found}. "
+                    f"required on row {HEADER_ROW}: {required}"
+                ),
+            )
         raise SheetNotFoundError(
-            f"Missing required Pioneers sheet: {PRODUCT_SHEET_NAME}",
+            "No sheet matches the Pioneers product headers",
             filename=source,
-            sheet=PRODUCT_SHEET_NAME,
-            reason=f"available sheets: {list(workbook.sheetnames)}",
+            reason=(
+                f"available sheets: {available}. "
+                f"required on row {HEADER_ROW}: {required}"
+            ),
         )
+
+    @staticmethod
+    def _sheet_has_required_headers(worksheet: Worksheet) -> bool:
+        found: set[str] = set()
+        header_row = worksheet[HEADER_ROW]
+        for cell in header_row:
+            value = getattr(cell, "value", None)
+            if isinstance(value, str):
+                header = value.strip()
+                if header in REQUIRED_HEADERS:
+                    found.add(header)
+        return all(header in found for header in REQUIRED_HEADERS)
 
     def _read_header_map(
         self, worksheet: Worksheet, source: Path

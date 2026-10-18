@@ -399,6 +399,7 @@ def test_domain_package_exports() -> None:
     from gheymatyar import domain
 
     assert set(domain.__all__) == {
+        "FinalSalePriceUpdate",
         "MappingType",
         "MatchStatus",
         "PioneersProduct",

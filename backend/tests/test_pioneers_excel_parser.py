@@ -13,7 +13,6 @@ from openpyxl import Workbook, load_workbook
 from gheymatyar.parsers import (
     AmbiguousMappedHeaderError,
     InvalidProductRow,
-    MissingRequiredColumnError,
     PioneersExcelError,
     PioneersExcelParser,
     SheetNotFoundError,
@@ -134,10 +133,10 @@ def test_missing_required_header_produces_clear_error(tmp_path: Path) -> None:
         headers=["کد کالا", "نام دیگر", "نرخ فروش اصلی"],
         rows=[["90001", "X", "100"]],
     )
-    with pytest.raises(MissingRequiredColumnError) as exc_info:
+    with pytest.raises(SheetNotFoundError) as exc_info:
         PioneersExcelParser().parse(path)
     message = str(exc_info.value)
-    assert "Missing required Pioneers column" in message
+    assert "No sheet matches" in message
     assert HEADER_NAME in message
 
 
@@ -426,12 +425,29 @@ def test_missing_sheet_raises(tmp_path: Path) -> None:
     path = tmp_path / "wrong_sheet.xlsx"
     wb = Workbook()
     wb.active.title = "Other"
-    wb.active["A1"] = HEADER_CODE
-    wb.active["B1"] = HEADER_NAME
+    wb.active["A1"] = "یادداشت"
     wb.save(path)
     with pytest.raises(SheetNotFoundError) as exc_info:
         PioneersExcelParser().parse(path)
-    assert PRODUCT_SHEET_NAME in str(exc_info.value)
+    assert HEADER_CODE in str(exc_info.value)
+    assert "Other" in str(exc_info.value)
+
+
+def test_renamed_product_sheet_still_parses(tmp_path: Path) -> None:
+    path = tmp_path / "renamed_sheet.xlsx"
+    _write_workbook(
+        path,
+        headers=[HEADER_CODE, HEADER_NAME, HEADER_SALE_PRICE],
+        rows=[["91001", "Renamed Sheet Product", "100"]],
+    )
+    workbook = load_workbook(path)
+    workbook.worksheets[0].title = "نمونه کالا"
+    workbook.save(path)
+    workbook.close()
+    result = PioneersExcelParser().parse(path)
+    assert len(result.products) == 1
+    assert result.products[0].code == "91001"
+    assert result.products[0].name == "Renamed Sheet Product"
 
 
 def test_missing_code_header_message(tmp_path: Path) -> None:
@@ -441,7 +457,7 @@ def test_missing_code_header_message(tmp_path: Path) -> None:
         headers=[HEADER_NAME, HEADER_SALE_PRICE],
         rows=[["Only Name", "100"]],
     )
-    with pytest.raises(MissingRequiredColumnError) as exc_info:
+    with pytest.raises(SheetNotFoundError) as exc_info:
         PioneersExcelParser().parse(path)
     assert HEADER_CODE in str(exc_info.value)
 

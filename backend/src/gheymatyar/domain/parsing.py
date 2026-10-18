@@ -72,3 +72,28 @@ def require_positive_decimal(value: Any, field_name: str) -> Decimal:
     if amount <= 0:
         raise ValueError(f"{field_name} must be greater than zero")
     return amount
+
+
+def require_positive_whole_price(value: Any, field_name: str) -> Decimal:
+    """Accept a positive whole-number price without routing money through float.
+
+    The inspected Pioneers ``نرخ فروش اصلی`` cells are integer Rial/Toman
+    amounts stored as text (for example ``4610000``). Fractional values are
+    rejected instead of rounded. ``Decimal('4950000.00')`` is exact and is
+    accepted; ``Decimal('4950000.50')`` is not.
+    """
+    if isinstance(value, float):
+        raise ValueError(
+            f"{field_name} must not be a float; use Decimal or a decimal string"
+        )
+    if value is None:
+        raise ValueError(f"{field_name} is required")
+    amount = to_decimal(value)
+    if amount <= 0:
+        raise ValueError(f"{field_name} must be greater than zero")
+    if amount != amount.to_integral_value():
+        raise ValueError(
+            f"{field_name} must be a whole number; fractional prices are not "
+            "written to نرخ فروش اصلی"
+        )
+    return amount
