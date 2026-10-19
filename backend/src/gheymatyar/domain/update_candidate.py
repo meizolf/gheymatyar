@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
-from gheymatyar.domain.enums import MappingType, MatchStatus
+from gheymatyar.domain.enums import MappingType, MatchStatus, ReviewDecision
 from gheymatyar.domain.parsing import (
     normalize_optional_str,
     require_non_empty_str,
@@ -20,38 +20,41 @@ class UpdateCandidate(BaseModel):
 
     model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
 
-    pioneers_code: str
-    pioneers_name: str
+    candidate_id: str
+    row_number: int | None = None
+    pioneers_code: str | None = None
+    pioneers_name: str | None = None
     supplier_code: str | None = None
     supplier_name: str
-    old_price: Decimal
-    new_price: Decimal
-    absolute_change: Decimal
-    # Null when percentage cannot be calculated safely (e.g. old_price == 0).
+    old_price: Decimal | None = None
+    new_price: Decimal | None = None
+    absolute_change: Decimal | None = None
     percentage_change: Decimal | None = None
-    # Reuses MappingType so match provenance matches mapping semantics.
-    match_type: MappingType
+    match_type: MappingType | None = None
     status: MatchStatus
+    review_decision: ReviewDecision = ReviewDecision.INCLUDE
     warnings: list[str] = Field(default_factory=list)
+    suggestions: list[dict[str, Any]] = Field(default_factory=list)
 
-    @field_validator("pioneers_code", "pioneers_name", "supplier_name", mode="before")
+    @field_validator("candidate_id", "supplier_name", mode="before")
     @classmethod
     def _required_text(cls, value: Any, info: ValidationInfo) -> str:
         return require_non_empty_str(value, info.field_name)
 
-    @field_validator("supplier_code", mode="before")
+    @field_validator("pioneers_code", "pioneers_name", "supplier_code", mode="before")
     @classmethod
-    def _optional_supplier_code(cls, value: Any) -> str | None:
-        return normalize_optional_str(value, "supplier_code")
+    def _optional_text(cls, value: Any, info: ValidationInfo) -> str | None:
+        return normalize_optional_str(value, info.field_name)
 
-    @field_validator("old_price", "new_price", "absolute_change", mode="before")
+    @field_validator(
+        "old_price",
+        "new_price",
+        "absolute_change",
+        "percentage_change",
+        mode="before",
+    )
     @classmethod
-    def _required_decimals(cls, value: Any) -> Decimal:
-        return to_decimal(value)
-
-    @field_validator("percentage_change", mode="before")
-    @classmethod
-    def _optional_percentage(cls, value: Any) -> Decimal | None:
+    def _optional_decimals(cls, value: Any) -> Decimal | None:
         if value is None:
             return None
         if isinstance(value, str) and not value.strip():
@@ -73,3 +76,12 @@ class UpdateCandidate(BaseModel):
             if text:
                 cleaned.append(text)
         return cleaned
+
+    @field_validator("suggestions", mode="before")
+    @classmethod
+    def _suggestions(cls, value: Any) -> list[dict[str, Any]]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("suggestions must be a list")
+        return list(value)

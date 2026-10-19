@@ -1,6 +1,6 @@
 """Plain persistence records returned by repositories.
 
-These are independent of both SQLAlchemy ORM rows and Step 2 domain models.
+These are independent of both SQLAlchemy ORM rows and domain models.
 """
 
 from __future__ import annotations
@@ -22,8 +22,11 @@ class SupplierRecord:
 class ProductMappingRecord:
     id: int
     supplier_id: int
-    supplier_code: str
-    pioneers_code: str
+    supplier_name_raw: str
+    supplier_name_normalized: str
+    pioneers_name_raw: str
+    pioneers_name_normalized: str
+    pioneers_code: str | None
     mapping_type: str
     created_at: datetime
     updated_at: datetime

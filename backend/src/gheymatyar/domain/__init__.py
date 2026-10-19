@@ -3,7 +3,7 @@
 Pure in-memory value objects — no persistence, FastAPI, or file I/O.
 """
 
-from gheymatyar.domain.enums import MappingType, MatchStatus
+from gheymatyar.domain.enums import MappingType, MatchStatus, ReviewDecision
 from gheymatyar.domain.final_sale_price import FinalSalePriceUpdate
 from gheymatyar.domain.mapping import ProductMapping
 from gheymatyar.domain.product import PioneersProduct
@@ -16,6 +16,7 @@ __all__ = [
     "MatchStatus",
     "PioneersProduct",
     "ProductMapping",
+    "ReviewDecision",
     "SupplierPriceItem",
     "UpdateCandidate",
 ]

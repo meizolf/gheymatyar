@@ -15,13 +15,17 @@ from gheymatyar.domain.parsing import (
 
 
 class PioneersProduct(BaseModel):
-    """A product row imported from a Pioneers Excel export."""
+    """A product row imported from a Pioneers Excel export.
+
+    ``name`` is required. ``code`` is optional — used as a secondary safety
+    check during export, not as the primary matching key.
+    """
 
     model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
 
     row_number: int = Field(..., ge=1, description="Original Excel row number")
-    code: str
     name: str
+    code: str | None = None
     barcode: str | None = None
     unit: str | None = None
     sale_price: Decimal | None = None
@@ -31,12 +35,12 @@ class PioneersProduct(BaseModel):
     # Arbitrary source-row keys (column letters, indexes, headers, etc.).
     raw_values: dict[Any, Any] = Field(default_factory=dict)
 
-    @field_validator("code", "name", mode="before")
+    @field_validator("name", mode="before")
     @classmethod
-    def _required_text(cls, value: Any, info: ValidationInfo) -> str:
+    def _required_name(cls, value: Any, info: ValidationInfo) -> str:
         return require_non_empty_str(value, info.field_name)
 
-    @field_validator("barcode", "unit", mode="before")
+    @field_validator("code", "barcode", "unit", mode="before")
     @classmethod
     def _optional_text(cls, value: Any, info: ValidationInfo) -> str | None:
         return normalize_optional_str(value, info.field_name)

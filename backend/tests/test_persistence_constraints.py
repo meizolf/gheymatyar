@@ -146,7 +146,8 @@ def test_foreign_key_mapping_rejects_missing_supplier(session: Session) -> None:
     with pytest.raises(IntegrityError):
         repo.create(
             supplier_id=999_999,
-            supplier_code="ABC",
+            supplier_name_raw="لوله 20",
+            pioneers_name_raw="اذین لوله 20",
             pioneers_code="100",
             mapping_type=MappingType.MANUAL,
         )

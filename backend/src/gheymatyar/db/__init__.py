@@ -6,6 +6,7 @@ ORM models and engine/session helpers live here. Domain models in
 
 from gheymatyar.db.database import (
     Database,
+    MigrationError,
     create_engine_for_url,
     create_session_factory,
     init_db,
@@ -27,6 +28,7 @@ __all__ = [
     "JobItemRow",
     "JobRow",
     "JobStatus",
+    "MigrationError",
     "ProductMappingRow",
     "SettingRow",
     "SupplierRow",

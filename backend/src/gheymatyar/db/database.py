@@ -14,13 +14,16 @@ from typing import Any
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
+from gheymatyar.db.migrate import MigrationError, migrate_schema
 from gheymatyar.db.models import Base, utc_now
 
 __all__ = [
     "Database",
+    "MigrationError",
     "create_engine_for_url",
     "create_session_factory",
     "init_db",
+    "migrate_schema",
     "session_scope",
     "utc_now",
 ]
@@ -57,7 +60,9 @@ def create_session_factory(engine: Engine) -> sessionmaker[Session]:
 
 
 def init_db(engine: Engine) -> None:
-    """Create all ORM-mapped tables if they do not already exist."""
+    """Migrate legacy schemas, then create any missing ORM tables."""
+    # Rename/drop incompatible legacy tables before create_all.
+    migrate_schema(engine)
     Base.metadata.create_all(bind=engine)
 
 

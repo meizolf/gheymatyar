@@ -1,13 +1,7 @@
 """Health endpoint tests."""
 
-from fastapi.testclient import TestClient
 
-from gheymatyar.main import app
-
-client = TestClient(app)
-
-
-def test_health_returns_ok() -> None:
+def test_health_returns_ok(client) -> None:
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}

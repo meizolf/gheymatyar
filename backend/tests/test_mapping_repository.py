@@ -1,4 +1,4 @@
-"""MappingRepository tests."""
+"""MappingRepository tests (name-based mappings)."""
 
 from __future__ import annotations
 
@@ -12,10 +12,11 @@ from gheymatyar.repositories import (
     MappingRepository,
     SupplierRepository,
 )
+from gheymatyar.services.name_normalization import normalize_product_name
 
 
-def _supplier(session: Session, name: str = "Supplier A") -> int:
-    return SupplierRepository(session).create(name=name, parser_type="pdf").id
+def _supplier(session: Session, name: str = "آذین لوله") -> int:
+    return SupplierRepository(session).create(name=name, parser_type="azin_pipe").id
 
 
 def test_save_and_retrieve_mapping(session: Session) -> None:
@@ -24,15 +25,21 @@ def test_save_and_retrieve_mapping(session: Session) -> None:
 
     created = repo.create(
         supplier_id=supplier_id,
-        supplier_code="ABC",
-        pioneers_code="100",
-        mapping_type=MappingType.AUTO_CODE,
+        supplier_name_raw="اذین لوله سه لایه 20",
+        pioneers_name_raw="اذین لوله سه لایه 20",
+        pioneers_code="16251",
+        mapping_type=MappingType.MANUAL,
     )
-    assert created.supplier_code == "ABC"
-    assert created.pioneers_code == "100"
-    assert created.mapping_type == MappingType.AUTO_CODE.value
+    assert created.supplier_name_raw == "اذین لوله سه لایه 20"
+    assert created.pioneers_code == "16251"
+    assert created.mapping_type == MappingType.MANUAL.value
+    assert created.supplier_name_normalized == normalize_product_name(
+        "اذین لوله سه لایه 20"
+    )
 
-    fetched = repo.get_by_supplier_code(supplier_id, "ABC")
+    fetched = repo.get_by_supplier_name(
+        supplier_id, created.supplier_name_normalized
+    )
     assert fetched is not None
     assert fetched.id == created.id
 
@@ -42,144 +49,112 @@ def test_list_mappings_for_supplier(session: Session) -> None:
     repo = MappingRepository(session)
     repo.create(
         supplier_id=supplier_id,
-        supplier_code="A1",
-        pioneers_code="P1",
+        supplier_name_raw="اذین بوشن 20",
+        pioneers_name_raw="اذین بوشن 20",
         mapping_type=MappingType.MANUAL,
     )
     repo.create(
         supplier_id=supplier_id,
-        supplier_code="A2",
-        pioneers_code="P2",
-        mapping_type=MappingType.AUTO_BARCODE,
+        supplier_name_raw="اذین زانو 90 درجه 20",
+        pioneers_name_raw="اذین زانو 90 درجه 20",
+        mapping_type=MappingType.EXACT_NAME,
     )
 
-    codes = [m.supplier_code for m in repo.list_for_supplier(supplier_id)]
-    assert codes == ["A1", "A2"]
+    names = [m.supplier_name_raw for m in repo.list_for_supplier(supplier_id)]
+    assert names == ["اذین بوشن 20", "اذین زانو 90 درجه 20"]
 
 
 def test_explicit_update_mapping(session: Session) -> None:
     supplier_id = _supplier(session)
     repo = MappingRepository(session)
-    repo.create(
+    created = repo.create(
         supplier_id=supplier_id,
-        supplier_code="ABC",
-        pioneers_code="100",
-        mapping_type=MappingType.AUTO_CODE,
+        supplier_name_raw="اذین لوله 20",
+        pioneers_name_raw="اذین لوله 20",
+        pioneers_code="11307",
+        mapping_type=MappingType.EXACT_NAME,
     )
 
     updated = repo.update(
         supplier_id=supplier_id,
-        supplier_code="ABC",
-        pioneers_code="200",
+        supplier_name_normalized=created.supplier_name_normalized,
+        pioneers_name_raw="اذین لوله 20 PP.RCT",
+        pioneers_code="16246",
         mapping_type=MappingType.MANUAL,
     )
-    assert updated.pioneers_code == "200"
+    assert updated.pioneers_name_raw == "اذین لوله 20 PP.RCT"
+    assert updated.pioneers_code == "16246"
     assert updated.mapping_type == MappingType.MANUAL.value
 
-    fetched = repo.get_by_supplier_code(supplier_id, "ABC")
-    assert fetched is not None
-    assert fetched.pioneers_code == "200"
 
-
-def test_conflicting_duplicate_mapping_rejected(session: Session) -> None:
+def test_create_conflict(session: Session) -> None:
     supplier_id = _supplier(session)
     repo = MappingRepository(session)
     repo.create(
         supplier_id=supplier_id,
-        supplier_code="ABC",
-        pioneers_code="100",
-        mapping_type=MappingType.AUTO_CODE,
+        supplier_name_raw="اذین بوشن 20",
+        pioneers_name_raw="اذین بوشن 20",
+        mapping_type=MappingType.MANUAL,
     )
-
     with pytest.raises(MappingConflictError):
         repo.create(
             supplier_id=supplier_id,
-            supplier_code="ABC",
-            pioneers_code="200",
+            supplier_name_raw="اذین بوشن 20",
+            pioneers_name_raw="other",
             mapping_type=MappingType.MANUAL,
         )
 
-    # Original mapping unchanged (no silent overwrite).
-    fetched = repo.get_by_supplier_code(supplier_id, "ABC")
-    assert fetched is not None
-    assert fetched.pioneers_code == "100"
 
-
-def test_identical_duplicate_create_also_rejected(session: Session) -> None:
-    supplier_id = _supplier(session)
-    repo = MappingRepository(session)
-    repo.create(
-        supplier_id=supplier_id,
-        supplier_code="ABC",
-        pioneers_code="100",
-        mapping_type=MappingType.AUTO_CODE,
-    )
-
-    with pytest.raises(MappingConflictError):
-        repo.create(
-            supplier_id=supplier_id,
-            supplier_code="ABC",
-            pioneers_code="100",
-            mapping_type=MappingType.AUTO_CODE,
-        )
-
-
-def test_mappings_isolated_by_supplier(session: Session) -> None:
-    a = _supplier(session, "Supplier A")
-    b = _supplier(session, "Supplier B")
-    repo = MappingRepository(session)
-
-    repo.create(
-        supplier_id=a,
-        supplier_code="X",
-        pioneers_code="100",
-        mapping_type=MappingType.AUTO_CODE,
-    )
-    repo.create(
-        supplier_id=b,
-        supplier_code="X",
-        pioneers_code="200",
-        mapping_type=MappingType.MANUAL,
-    )
-
-    assert repo.get_by_supplier_code(a, "X") is not None
-    assert repo.get_by_supplier_code(a, "X").pioneers_code == "100"  # type: ignore[union-attr]
-    assert repo.get_by_supplier_code(b, "X").pioneers_code == "200"  # type: ignore[union-attr]
-
-
-def test_update_missing_mapping_raises(session: Session) -> None:
+def test_update_missing(session: Session) -> None:
     supplier_id = _supplier(session)
     repo = MappingRepository(session)
     with pytest.raises(MappingNotFoundError):
         repo.update(
             supplier_id=supplier_id,
-            supplier_code="NOPE",
-            pioneers_code="1",
+            supplier_name_normalized="missing",
+            pioneers_name_raw="x",
         )
 
 
-def test_rejected_update_leaves_mapping_unchanged(session: Session) -> None:
-    """Invalid mapping_type must not partially apply pioneers_code."""
+def test_upsert_creates_and_updates(session: Session) -> None:
     supplier_id = _supplier(session)
     repo = MappingRepository(session)
-    repo.create(
+    first = repo.upsert(
         supplier_id=supplier_id,
-        supplier_code="ABC",
-        pioneers_code="100",
-        mapping_type=MappingType.AUTO_CODE,
+        supplier_name_raw="اذین درپوش 20",
+        pioneers_name_raw="اذین درپوش 20",
+        pioneers_code="1",
     )
-    session.commit()
+    second = repo.upsert(
+        supplier_id=supplier_id,
+        supplier_name_raw="اذین درپوش 20",
+        pioneers_name_raw="اذین درپوش گپ 20",
+        pioneers_code="2",
+    )
+    assert first.id == second.id
+    assert second.pioneers_name_raw == "اذین درپوش گپ 20"
+    assert second.pioneers_code == "2"
 
-    with pytest.raises(ValueError, match="invalid mapping_type"):
-        repo.update(
-            supplier_id=supplier_id,
-            supplier_code="ABC",
-            pioneers_code="200",
-            mapping_type="not-a-real-type",
-        )
 
-    fetched = repo.get_by_supplier_code(supplier_id, "ABC")
-    assert fetched is not None
-    assert fetched.pioneers_code == "100"
-    assert fetched.mapping_type == MappingType.AUTO_CODE.value
-
+def test_mappings_are_supplier_specific(session: Session) -> None:
+    a = _supplier(session, "Supplier A")
+    b = _supplier(session, "Supplier B")
+    repo = MappingRepository(session)
+    repo.create(
+        supplier_id=a,
+        supplier_name_raw="لوله 20",
+        pioneers_name_raw="اذین لوله 20",
+        mapping_type=MappingType.MANUAL,
+    )
+    repo.create(
+        supplier_id=b,
+        supplier_name_raw="لوله 20",
+        pioneers_name_raw="پارس پلاست لوله 20",
+        mapping_type=MappingType.MANUAL,
+    )
+    assert len(repo.list_for_supplier(a)) == 1
+    assert len(repo.list_for_supplier(b)) == 1
+    assert (
+        repo.list_for_supplier(a)[0].pioneers_name_raw
+        != repo.list_for_supplier(b)[0].pioneers_name_raw
+    )

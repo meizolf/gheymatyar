@@ -54,9 +54,12 @@ def supplier(**overrides: object) -> SupplierPriceItem:
 def mapping(**overrides: object) -> ProductMapping:
     data: dict[str, object] = {
         "supplier_id": "sup-1",
-        "supplier_code": "S-55",
+        "supplier_name_raw": "Supplier Item",
+        "supplier_name_normalized": "supplier item",
+        "pioneers_name_raw": "Sample Product",
+        "pioneers_name_normalized": "sample product",
         "pioneers_code": "P-100",
-        "mapping_type": MappingType.AUTO_BARCODE,
+        "mapping_type": MappingType.MANUAL,
     }
     data.update(overrides)
     return ProductMapping(**data)  # type: ignore[arg-type]
@@ -64,6 +67,8 @@ def mapping(**overrides: object) -> ProductMapping:
 
 def candidate(**overrides: object) -> UpdateCandidate:
     data: dict[str, object] = {
+        "candidate_id": "c-1",
+        "row_number": 2,
         "pioneers_code": "P-100",
         "pioneers_name": "Sample Product",
         "supplier_code": "S-55",
@@ -72,7 +77,7 @@ def candidate(**overrides: object) -> UpdateCandidate:
         "new_price": Decimal("11000"),
         "absolute_change": Decimal("1000"),
         "percentage_change": Decimal("10"),
-        "match_type": MappingType.AUTO_BARCODE,
+        "match_type": MappingType.EXACT_NAME,
         "status": MatchStatus.MATCHED,
         "warnings": [],
     }
@@ -92,11 +97,11 @@ def test_pioneers_product_valid_creation() -> None:
     assert product.raw_values == {"A": "P-100"}
 
 
-def test_pioneers_product_rejects_blank_code() -> None:
-    with pytest.raises(ValidationError):
-        pioneers(code="")
-    with pytest.raises(ValidationError):
-        pioneers(code="   ")
+def test_pioneers_product_optional_code() -> None:
+    product = pioneers(code=None)
+    assert product.code is None
+    blank = pioneers(code="   ")
+    assert blank.code is None
 
 
 def test_pioneers_product_rejects_blank_name() -> None:
@@ -113,7 +118,8 @@ def test_pioneers_product_rejects_non_positive_row_number(row_number: int) -> No
 
 
 def test_pioneers_product_optional_fields_may_be_absent() -> None:
-    product = PioneersProduct(row_number=1, code="P-1", name="Only required")
+    product = PioneersProduct(row_number=1, name="Only required")
+    assert product.code is None
     assert product.barcode is None
     assert product.unit is None
     assert product.sale_price is None
@@ -124,8 +130,8 @@ def test_pioneers_product_optional_fields_may_be_absent() -> None:
 
 
 def test_pioneers_product_raw_values_defaults_safely_and_independently() -> None:
-    a = PioneersProduct(row_number=1, code="A", name="A")
-    b = PioneersProduct(row_number=2, code="B", name="B")
+    a = PioneersProduct(row_number=1, name="A")
+    b = PioneersProduct(row_number=2, name="B")
     a.raw_values["x"] = 1
     assert "x" not in b.raw_values
     assert a.raw_values is not b.raw_values
@@ -256,26 +262,34 @@ def test_supplier_price_item_raw_values_accepts_arbitrary_keys() -> None:
 
 def test_product_mapping_valid() -> None:
     m = mapping()
-    assert m.mapping_type is MappingType.AUTO_BARCODE
+    assert m.mapping_type is MappingType.MANUAL
+    assert m.pioneers_code == "P-100"
 
 
 @pytest.mark.parametrize("bad", ["", "  ", None])
-def test_product_mapping_rejects_blank_supplier_code(bad: object) -> None:
+def test_product_mapping_rejects_blank_supplier_name(bad: object) -> None:
     with pytest.raises(ValidationError):
-        mapping(supplier_code=bad)
+        mapping(supplier_name_raw=bad)
 
 
 @pytest.mark.parametrize("bad", ["", "  ", None])
-def test_product_mapping_rejects_blank_pioneers_code(bad: object) -> None:
+def test_product_mapping_rejects_blank_pioneers_name(bad: object) -> None:
     with pytest.raises(ValidationError):
-        mapping(pioneers_code=bad)
+        mapping(pioneers_name_raw=bad)
+
+
+def test_product_mapping_optional_pioneers_code() -> None:
+    m = mapping(pioneers_code=None)
+    assert m.pioneers_code is None
+    m2 = mapping(pioneers_code="  ")
+    assert m2.pioneers_code is None
 
 
 @pytest.mark.parametrize(
     "value,expected",
     [
-        (MappingType.AUTO_CODE, MappingType.AUTO_CODE),
-        ("AUTO_BARCODE", MappingType.AUTO_BARCODE),
+        (MappingType.SAVED_MAPPING, MappingType.SAVED_MAPPING),
+        ("EXACT_NAME", MappingType.EXACT_NAME),
         ("MANUAL", MappingType.MANUAL),
     ],
 )
@@ -286,7 +300,7 @@ def test_product_mapping_accepts_supported_mapping_types(
     assert m.mapping_type is expected
 
 
-@pytest.mark.parametrize("bad", ["barcode", "CODE", "guess", ""])
+@pytest.mark.parametrize("bad", ["barcode", "CODE", "AUTO_CODE", ""])
 def test_product_mapping_rejects_unsupported_mapping_types(bad: object) -> None:
     with pytest.raises(ValidationError):
         mapping(mapping_type=bad)
@@ -298,31 +312,30 @@ def test_product_mapping_rejects_unsupported_mapping_types(bad: object) -> None:
 def test_update_candidate_valid_creation() -> None:
     c = candidate()
     assert c.status is MatchStatus.MATCHED
-    assert c.match_type is MappingType.AUTO_BARCODE
+    assert c.match_type is MappingType.EXACT_NAME
     assert c.old_price == Decimal("10000")
     assert c.new_price == Decimal("11000")
     assert c.percentage_change == Decimal("10")
 
 
-def test_update_candidate_required_identifiers_and_names() -> None:
-    for field in ("pioneers_code", "pioneers_name", "supplier_name"):
+def test_update_candidate_required_fields() -> None:
+    for field in ("candidate_id", "supplier_name"):
         with pytest.raises(ValidationError):
             candidate(**{field: ""})
         with pytest.raises(ValidationError):
             candidate(**{field: "  "})
 
 
-def test_update_candidate_optional_supplier_code() -> None:
-    c = candidate(supplier_code=None)
+def test_update_candidate_optional_identifiers() -> None:
+    c = candidate(pioneers_code=None, pioneers_name=None, supplier_code=None)
+    assert c.pioneers_code is None
+    assert c.pioneers_name is None
     assert c.supplier_code is None
-    c2 = candidate(supplier_code="  ")
-    assert c2.supplier_code is None
 
 
 def test_update_candidate_warnings_default_safely_and_independently() -> None:
     a = UpdateCandidate(
-        pioneers_code="P-1",
-        pioneers_name="N",
+        candidate_id="a",
         supplier_name="S",
         old_price=Decimal("0"),
         new_price=Decimal("10"),
@@ -332,6 +345,7 @@ def test_update_candidate_warnings_default_safely_and_independently() -> None:
         status=MatchStatus.UNMATCHED,
     )
     b = UpdateCandidate(
+        candidate_id="b",
         pioneers_code="P-2",
         pioneers_name="N2",
         supplier_name="S2",
@@ -339,7 +353,7 @@ def test_update_candidate_warnings_default_safely_and_independently() -> None:
         new_price=Decimal("2"),
         absolute_change=Decimal("1"),
         percentage_change=Decimal("100"),
-        match_type=MappingType.AUTO_CODE,
+        match_type=MappingType.EXACT_NAME,
         status=MatchStatus.MATCHED,
     )
     assert a.warnings == []
@@ -404,8 +418,9 @@ def test_domain_package_exports() -> None:
         "MatchStatus",
         "PioneersProduct",
         "ProductMapping",
+        "ReviewDecision",
         "SupplierPriceItem",
         "UpdateCandidate",
     }
-    assert MappingType.AUTO_CODE.value == "AUTO_CODE"
+    assert MappingType.EXACT_NAME.value == "EXACT_NAME"
     assert MatchStatus.AMBIGUOUS.value == "AMBIGUOUS"

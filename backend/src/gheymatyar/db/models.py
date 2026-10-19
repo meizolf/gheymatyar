@@ -118,12 +118,18 @@ class SupplierRow(Base):
 
 
 class ProductMappingRow(Base):
+    """Supplier-specific confirmed product-name mappings.
+
+    Excel row numbers are never stored. Product codes are optional secondary
+    verification references only.
+    """
+
     __tablename__ = "product_mappings"
     __table_args__ = (
         UniqueConstraint(
             "supplier_id",
-            "supplier_code",
-            name="uq_product_mappings_supplier_code",
+            "supplier_name_normalized",
+            name="uq_product_mappings_supplier_name",
         ),
     )
 
@@ -133,9 +139,12 @@ class ProductMappingRow(Base):
         ForeignKey("suppliers.id", ondelete="CASCADE"),
         nullable=False,
     )
-    supplier_code: Mapped[str] = mapped_column(String(255), nullable=False)
-    pioneers_code: Mapped[str] = mapped_column(String(255), nullable=False)
-    # Values align with domain MappingType: AUTO_CODE / AUTO_BARCODE / MANUAL
+    supplier_name_raw: Mapped[str] = mapped_column(Text, nullable=False)
+    supplier_name_normalized: Mapped[str] = mapped_column(String(512), nullable=False)
+    pioneers_name_raw: Mapped[str] = mapped_column(Text, nullable=False)
+    pioneers_name_normalized: Mapped[str] = mapped_column(String(512), nullable=False)
+    pioneers_code: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Values align with domain MappingType: SAVED_MAPPING / EXACT_NAME / MANUAL
     mapping_type: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime(),

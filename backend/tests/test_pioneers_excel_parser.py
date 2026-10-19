@@ -140,26 +140,23 @@ def test_missing_required_header_produces_clear_error(tmp_path: Path) -> None:
     assert HEADER_NAME in message
 
 
-def test_missing_product_code_collected_for_review(tmp_path: Path) -> None:
+def test_missing_product_code_accepted_as_named_product(tmp_path: Path) -> None:
     path = tmp_path / "missing_code.xlsx"
     _write_workbook(
         path,
         headers=[HEADER_CODE, HEADER_NAME, HEADER_SALE_PRICE],
         rows=[
             [None, "Has Name Only", "100"],
-            ["91002", "Valid After Invalid", "200"],
+            ["91002", "Valid With Code", "200"],
         ],
     )
     result = PioneersExcelParser().parse(path)
-    assert len(result.products) == 1
-    assert result.products[0].code == "91002"
-    assert len(result.invalid_rows) == 1
-    invalid = result.invalid_rows[0]
-    assert isinstance(invalid, InvalidProductRow)
-    assert invalid.row_number == 2
-    assert invalid.column == HEADER_CODE
-    assert invalid.name == "Has Name Only"
-    assert "کد کالا" in invalid.reason
+    assert len(result.products) == 2
+    assert result.products[0].code is None
+    assert result.products[0].name == "Has Name Only"
+    assert result.products[0].sale_price == Decimal("100")
+    assert result.products[1].code == "91002"
+    assert result.invalid_rows == []
 
 
 def test_missing_product_name_collected_for_review(tmp_path: Path) -> None:
@@ -327,6 +324,58 @@ def test_formula_code_is_rejected(tmp_path: Path) -> None:
     assert result.products == []
     assert len(result.invalid_rows) == 1
     assert "formula" in result.invalid_rows[0].reason.lower()
+
+
+def test_formula_name_keeps_parsed_code_for_duplicate_detection(tmp_path: Path) -> None:
+    """Code must be recorded even when name validation fails (formula cell)."""
+    path = tmp_path / "formula_name_dup.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = PRODUCT_SHEET_NAME
+    ws["A1"] = HEADER_CODE
+    ws["B1"] = HEADER_NAME
+    ws["C1"] = HEADER_SALE_PRICE
+    ws["A2"] = "DUP01"
+    ws["B2"] = "Valid Product"
+    ws["C2"] = "1000"
+    ws["A3"] = "DUP01"
+    ws["B3"] = "=B2"  # formula name → invalid, but code was already parsed
+    ws["C3"] = "2000"
+    wb.save(path)
+
+    result = PioneersExcelParser().parse(path)
+    assert len(result.products) == 1
+    assert result.products[0].code == "DUP01"
+    assert len(result.invalid_rows) == 1
+    assert result.invalid_rows[0].code == "DUP01"
+    assert result.invalid_rows[0].column == HEADER_NAME
+    assert "formula" in result.invalid_rows[0].reason.lower()
+    assert "DUP01" in result.duplicate_codes
+    assert set(result.duplicate_codes["DUP01"]) == {2, 3}
+
+
+def test_excel_error_name_keeps_parsed_code_for_duplicate_detection(
+    tmp_path: Path,
+) -> None:
+    """Code must be recorded even when name is an Excel error value."""
+    path = tmp_path / "error_name_dup.xlsx"
+    _write_workbook(
+        path,
+        headers=[HEADER_CODE, HEADER_NAME, HEADER_SALE_PRICE],
+        rows=[
+            ["DUP02", "Good Name", "1000"],
+            ["DUP02", "#REF!", "2000"],
+        ],
+    )
+    result = PioneersExcelParser().parse(path)
+    assert len(result.products) == 1
+    assert result.products[0].code == "DUP02"
+    assert len(result.invalid_rows) == 1
+    assert result.invalid_rows[0].code == "DUP02"
+    assert result.invalid_rows[0].column == HEADER_NAME
+    assert "error" in result.invalid_rows[0].reason.lower()
+    assert "DUP02" in result.duplicate_codes
+    assert set(result.duplicate_codes["DUP02"]) == {2, 3}
 
 
 def test_excel_error_barcode_is_rejected(tmp_path: Path) -> None:

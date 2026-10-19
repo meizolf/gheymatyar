@@ -153,7 +153,9 @@ class PioneersExcelParser:
                 self._validate_required_headers(
                     header_map, source, worksheet.title
                 )
-                products, invalid_rows = self._parse_rows(worksheet, header_map)
+                products, invalid_rows, duplicate_codes = self._parse_rows(
+                    worksheet, header_map
+                )
             except PioneersExcelError:
                 raise
             except Exception as exc:  # noqa: BLE001 - wrap deferred openpyxl/XML failures
@@ -164,7 +166,6 @@ class PioneersExcelParser:
                     reason=str(exc),
                 ) from exc
 
-            duplicate_codes = self._find_duplicate_codes(products)
             return PioneersParseResult(
                 products=products,
                 invalid_rows=invalid_rows,
@@ -290,7 +291,11 @@ class PioneersExcelParser:
         self,
         worksheet: Worksheet,
         header_map: Mapping[str, int],
-    ) -> tuple[list[PioneersProduct], list[InvalidProductRow]]:
+    ) -> tuple[
+        list[PioneersProduct],
+        list[InvalidProductRow],
+        dict[str, tuple[int, ...]],
+    ]:
         code_col = header_map[HEADER_CODE]
         name_col = header_map[HEADER_NAME]
         optional_cols = {
@@ -301,6 +306,11 @@ class PioneersExcelParser:
 
         products: list[PioneersProduct] = []
         invalid_rows: list[InvalidProductRow] = []
+        # Record every successfully parsed code immediately — before name or
+        # other field validation — so rejected rows still participate in
+        # duplicate-code detection.
+        code_rows: dict[str, list[int]] = defaultdict(list)
+
         # enumerate() supplies Excel row numbers: read_only EmptyCell has no .row
         for row_number, row_cells in enumerate(
             worksheet.iter_rows(min_row=HEADER_ROW + 1),
@@ -310,17 +320,17 @@ class PioneersExcelParser:
                 continue
             cells_by_col, raw_values = self._extract_row_cells(row_cells)
 
+            code: str | None = None
             try:
                 code = self._parse_code_or_barcode(
                     cells_by_col.get(code_col),
                     column=HEADER_CODE,
                 )
-                name = self._parse_name(cells_by_col.get(name_col))
             except (ValueError, InvalidProductRowError) as exc:
                 column = (
                     getattr(exc, "column", None)
                     if isinstance(exc, InvalidProductRowError)
-                    else None
+                    else HEADER_CODE
                 )
                 reason = (
                     exc.reason
@@ -332,6 +342,34 @@ class PioneersExcelParser:
                         row_number=row_number,
                         reason=reason,
                         column=column,
+                        raw_values=raw_values,
+                    )
+                )
+                continue
+
+            if code is not None:
+                code_rows[code].append(row_number)
+
+            name: str | None = None
+            try:
+                name = self._parse_name(cells_by_col.get(name_col))
+            except (ValueError, InvalidProductRowError) as exc:
+                column = (
+                    getattr(exc, "column", None)
+                    if isinstance(exc, InvalidProductRowError)
+                    else HEADER_NAME
+                )
+                reason = (
+                    exc.reason
+                    if isinstance(exc, InvalidProductRowError) and exc.reason
+                    else str(exc)
+                )
+                invalid_rows.append(
+                    InvalidProductRow(
+                        row_number=row_number,
+                        reason=reason,
+                        column=column,
+                        code=code,
                         raw_values=raw_values,
                     )
                 )
@@ -355,18 +393,7 @@ class PioneersExcelParser:
                 )
                 continue
 
-            if code is None:
-                invalid_rows.append(
-                    InvalidProductRow(
-                        row_number=row_number,
-                        reason="product-like row has empty کد کالا",
-                        column=HEADER_CODE,
-                        code=None,
-                        name=name,
-                        raw_values=raw_values,
-                    )
-                )
-                continue
+            # Name is the primary identity. Code is optional secondary safety.
             if name is None:
                 invalid_rows.append(
                     InvalidProductRow(
@@ -450,7 +477,12 @@ class PioneersExcelParser:
 
             products.append(product)
 
-        return products, invalid_rows
+        duplicate_codes = {
+            code: tuple(sorted(rows))
+            for code, rows in code_rows.items()
+            if len(rows) > 1
+        }
+        return products, invalid_rows, duplicate_codes
 
     @staticmethod
     def _extract_row_cells(
@@ -726,12 +758,24 @@ class PioneersExcelParser:
     @staticmethod
     def _find_duplicate_codes(
         products: list[PioneersProduct],
+        invalid_rows: list[InvalidProductRow] | None = None,
     ) -> dict[str, tuple[int, ...]]:
+        """Find codes that appear more than once across products *and* invalid rows.
+
+        Prefer the in-parse ``code_rows`` map from :meth:`_parse_rows`. This
+        helper remains for tests/callers that rebuild duplicates after the fact.
+        """
         rows_by_code: dict[str, list[int]] = defaultdict(list)
         for product in products:
+            if not product.code:
+                continue
             rows_by_code[product.code].append(product.row_number)
+        for invalid in invalid_rows or ():
+            if not invalid.code:
+                continue
+            rows_by_code[invalid.code].append(invalid.row_number)
         return {
-            code: tuple(rows)
+            code: tuple(sorted(rows))
             for code, rows in rows_by_code.items()
             if len(rows) > 1
         }
