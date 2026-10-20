@@ -1,0 +1,270 @@
+/* Shared lightweight UI primitives */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.55rem 1.1rem;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.btn-secondary {
+  background: #fff;
+  border-color: var(--border);
+  color: var(--text-h);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.btn-danger {
+  background: #fff;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--accent);
+  padding-inline: 0.6rem;
+}
+
+.btn-sm {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.field label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.field input,
+.field select,
+.field textarea {
+  font: inherit;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text-h);
+  min-height: 2.5rem;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.field-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.alert {
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  font-size: 0.92rem;
+  border: 1px solid transparent;
+}
+
+.alert-error {
+  background: var(--danger-bg);
+  border-color: #f5c2c7;
+  color: #842029;
+}
+
+.alert-warning {
+  background: var(--warn-bg);
+  border-color: #ffe69c;
+  color: #664d03;
+}
+
+.alert-success {
+  background: var(--ok-bg);
+  border-color: #a3cfbb;
+  color: #0f5132;
+}
+
+.alert-info {
+  background: var(--info-bg);
+  border-color: #b6d4fe;
+  color: #084298;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-ok {
+  background: var(--ok-bg);
+  color: #0f5132;
+}
+
+.badge-warn {
+  background: var(--warn-bg);
+  color: #664d03;
+}
+
+.badge-danger {
+  background: var(--danger-bg);
+  color: #842029;
+}
+
+.badge-neutral {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.badge-info {
+  background: var(--info-bg);
+  color: #084298;
+}
+
+.table-wrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.data-table th,
+.data-table td {
+  padding: 0.65rem 0.75rem;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.data-table th {
+  background: var(--surface-2);
+  font-weight: 700;
+  color: var(--text-h);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  white-space: nowrap;
+}
+
+.data-table tbody tr:hover {
+  background: #f8fafc;
+}
+
+.data-table .ltr {
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: isolate;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 100;
+}
+
+.modal {
+  background: #fff;
+  border-radius: 12px;
+  width: min(560px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.2);
+  padding: 1.25rem;
+}
+
+.modal h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.15rem;
+  color: var(--text-h);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-start;
+  margin-top: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.chip {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-h);
+}
+
+.chip strong {
+  color: var(--accent);
+}

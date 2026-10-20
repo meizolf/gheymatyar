@@ -53,7 +53,7 @@ def session(db: Database) -> Iterator[Session]:
 def client(tmp_path: Path) -> Iterator[TestClient]:
     """API client bound to an isolated temp database and session store."""
     db_path = tmp_path / "api.db"
-    app = create_app(database_url=f"sqlite:///{db_path}")
+    app = create_app(database_url=f"sqlite:///{db_path}", mount_spa=False)
     # Isolate in-memory sessions per test.
     store = SessionStore()
     app.state.sessions = store

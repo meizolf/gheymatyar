@@ -87,34 +87,35 @@ class ProcessingService:
     def upload_pioneers_excel(
         self, session_id: str, filename: str, stream: BinaryIO
     ) -> ProcessingSession:
-        session = self._store.require(session_id)
-        assert session.work_dir is not None
-        safe_name = _safe_filename(filename, default="pioneers.xlsx")
-        if not safe_name.lower().endswith(".xlsx"):
-            raise ValueError("expected an .xlsx Excel upload")
+        with self._store.session_lock(session_id):
+            session = self._store.require(session_id)
+            assert session.work_dir is not None
+            safe_name = _safe_filename(filename, default="pioneers.xlsx")
+            if not safe_name.lower().endswith(".xlsx"):
+                raise ValueError("expected an .xlsx Excel upload")
 
-        staging = session.work_dir / f"pioneers.staging.{uuid4().hex}.xlsx"
-        staging.write_bytes(stream.read())
-        try:
-            parse_result = self._parser.parse(staging)
-        except Exception:
-            staging.unlink(missing_ok=True)
-            raise
+            staging = session.work_dir / f"pioneers.staging.{uuid4().hex}.xlsx"
+            staging.write_bytes(stream.read())
+            try:
+                parse_result = self._parser.parse(staging)
+            except Exception:
+                staging.unlink(missing_ok=True)
+                raise
 
-        final = session.work_dir / "pioneers.xlsx"
-        staging.replace(final)
+            final = session.work_dir / "pioneers.xlsx"
+            staging.replace(final)
 
-        session.pioneers_filename = safe_name
-        session.pioneers_path = final
-        session.products = list(parse_result.products)
-        session.invalid_rows = list(parse_result.invalid_rows)
-        session.duplicate_codes = dict(parse_result.duplicate_codes)
-        session.candidates = []
-        session.matched_count = 0
-        session.unmatched_count = 0
-        session.ambiguous_count = 0
-        _invalidate_export(session)
-        return session
+            session.pioneers_filename = safe_name
+            session.pioneers_path = final
+            session.products = list(parse_result.products)
+            session.invalid_rows = list(parse_result.invalid_rows)
+            session.duplicate_codes = dict(parse_result.duplicate_codes)
+            session.candidates = []
+            session.matched_count = 0
+            session.unmatched_count = 0
+            session.ambiguous_count = 0
+            _invalidate_export(session)
+            return session
 
     def upload_supplier_pdf(
         self,
@@ -124,37 +125,52 @@ class ProcessingService:
         filename: str,
         stream: BinaryIO,
     ) -> ProcessingSession:
-        session = self._store.require(session_id)
-        assert session.work_dir is not None
-        processor = self._registry.get(supplier_key)
-        safe_name = _safe_filename(filename, default="supplier.pdf")
+        with self._store.session_lock(session_id):
+            session = self._store.require(session_id)
+            assert session.work_dir is not None
+            processor = self._registry.get(supplier_key)
+            safe_name = _safe_filename(filename, default="supplier.pdf")
 
-        staging = session.work_dir / f"supplier.staging.{uuid4().hex}.pdf"
-        staging.write_bytes(stream.read())
-        try:
-            parse_result = processor.parse_pdf(staging)
-        except Exception:
-            staging.unlink(missing_ok=True)
-            raise
+            staging = session.work_dir / f"supplier.staging.{uuid4().hex}.pdf"
+            staging.write_bytes(stream.read())
+            try:
+                parse_result = processor.parse_pdf(staging)
+            except Exception:
+                staging.unlink(missing_ok=True)
+                raise
 
-        final = session.work_dir / "supplier.pdf"
-        staging.replace(final)
+            final = session.work_dir / "supplier.pdf"
+            staging.replace(final)
 
-        session.supplier_key = processor.supplier_key
-        session.supplier_display_name = processor.display_name
-        session.pdf_filename = safe_name
-        session.pdf_path = final
-        session.supplier_items = list(parse_result.items)
-        session.parse_warnings = list(parse_result.warnings)
-        session.metadata["supplier_parse"] = parse_result.source_metadata
-        session.candidates = []
-        session.matched_count = 0
-        session.unmatched_count = 0
-        session.ambiguous_count = 0
-        _invalidate_export(session)
-        return session
+            session.supplier_key = processor.supplier_key
+            session.supplier_display_name = processor.display_name
+            session.pdf_filename = safe_name
+            session.pdf_path = final
+            session.supplier_items = list(parse_result.items)
+            session.parse_warnings = list(parse_result.warnings)
+            session.metadata["supplier_parse"] = parse_result.source_metadata
+            session.candidates = []
+            session.matched_count = 0
+            session.unmatched_count = 0
+            session.ambiguous_count = 0
+            _invalidate_export(session)
+            return session
 
     def run_matching(
+        self,
+        session_id: str,
+        db_session: Session,
+        *,
+        suspicious_percent_threshold: str | None = None,
+    ) -> ProcessingSession:
+        with self._store.session_lock(session_id):
+            return self._run_matching_unlocked(
+                session_id,
+                db_session,
+                suspicious_percent_threshold=suspicious_percent_threshold,
+            )
+
+    def _run_matching_unlocked(
         self,
         session_id: str,
         db_session: Session,
@@ -229,78 +245,79 @@ class ProcessingService:
         pioneers_row_number: int,
         save: bool = True,
     ) -> UpdateCandidate:
-        session = self._store.require(session_id)
-        candidate = session.get_candidate(candidate_id)
-        if candidate is None:
-            raise KeyError(candidate_id)
+        with self._store.session_lock(session_id):
+            session = self._store.require(session_id)
+            candidate = session.get_candidate(candidate_id)
+            if candidate is None:
+                raise KeyError(candidate_id)
 
-        product = next(
-            (p for p in session.products if p.row_number == pioneers_row_number),
-            None,
-        )
-        if product is None:
-            raise ValueError(f"no Pioneers product at row {pioneers_row_number}")
-
-        if not session.supplier_key:
-            raise ValueError("supplier is not set on this session")
-        processor = self._registry.get(session.supplier_key)
-        new_price = candidate.new_price
-        if new_price is None:
-            raise ValueError("candidate has no new price")
-
-        absolute = (
-            new_price - product.sale_price
-            if product.sale_price is not None
-            else None
-        )
-        percentage = None
-        if (
-            product.sale_price is not None
-            and product.sale_price != Decimal("0")
-            and absolute is not None
-        ):
-            percentage = (absolute / product.sale_price) * Decimal("100")
-
-        updated = UpdateCandidate(
-            candidate_id=candidate.candidate_id,
-            row_number=product.row_number,
-            pioneers_code=product.code,
-            pioneers_name=product.name,
-            supplier_code=candidate.supplier_code,
-            supplier_name=candidate.supplier_name,
-            old_price=product.sale_price,
-            new_price=new_price,
-            absolute_change=absolute,
-            percentage_change=percentage,
-            match_type=MappingType.MANUAL,
-            status=MatchStatus.MATCHED,
-            review_decision=ReviewDecision.INCLUDE,
-            warnings=[],
-            suggestions=[],
-        )
-        threshold = resolve_suspicious_percent_threshold(
-            request_value=session.metadata.get("suspicious_percent_threshold"),
-            default=DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
-        )
-        updated = apply_price_warnings(
-            [updated],
-            suspicious_percent_threshold=threshold,
-            conflicted_row_numbers=session.conflicted_row_numbers,
-        )[0]
-        session.replace_candidate(updated)
-        self._recount(session)
-        _invalidate_export(session)
-
-        if save:
-            supplier_row = self._ensure_supplier_row(db_session, processor)
-            MappingRepository(db_session).upsert(
-                supplier_id=supplier_row.id,
-                supplier_name_raw=candidate.supplier_name,
-                pioneers_name_raw=product.name,
-                pioneers_code=product.code,
-                mapping_type=MappingType.MANUAL,
+            product = next(
+                (p for p in session.products if p.row_number == pioneers_row_number),
+                None,
             )
-        return updated
+            if product is None:
+                raise ValueError(f"no Pioneers product at row {pioneers_row_number}")
+
+            if not session.supplier_key:
+                raise ValueError("supplier is not set on this session")
+            processor = self._registry.get(session.supplier_key)
+            new_price = candidate.new_price
+            if new_price is None:
+                raise ValueError("candidate has no new price")
+
+            absolute = (
+                new_price - product.sale_price
+                if product.sale_price is not None
+                else None
+            )
+            percentage = None
+            if (
+                product.sale_price is not None
+                and product.sale_price != Decimal("0")
+                and absolute is not None
+            ):
+                percentage = (absolute / product.sale_price) * Decimal("100")
+
+            updated = UpdateCandidate(
+                candidate_id=candidate.candidate_id,
+                row_number=product.row_number,
+                pioneers_code=product.code,
+                pioneers_name=product.name,
+                supplier_code=candidate.supplier_code,
+                supplier_name=candidate.supplier_name,
+                old_price=product.sale_price,
+                new_price=new_price,
+                absolute_change=absolute,
+                percentage_change=percentage,
+                match_type=MappingType.MANUAL,
+                status=MatchStatus.MATCHED,
+                review_decision=ReviewDecision.INCLUDE,
+                warnings=[],
+                suggestions=[],
+            )
+            threshold = resolve_suspicious_percent_threshold(
+                request_value=session.metadata.get("suspicious_percent_threshold"),
+                default=DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
+            )
+            updated = apply_price_warnings(
+                [updated],
+                suspicious_percent_threshold=threshold,
+                conflicted_row_numbers=session.conflicted_row_numbers,
+            )[0]
+            session.replace_candidate(updated)
+            self._recount(session)
+            _invalidate_export(session)
+
+            if save:
+                supplier_row = self._ensure_supplier_row(db_session, processor)
+                MappingRepository(db_session).upsert(
+                    supplier_id=supplier_row.id,
+                    supplier_name_raw=candidate.supplier_name,
+                    pioneers_name_raw=product.name,
+                    pioneers_code=product.code,
+                    mapping_type=MappingType.MANUAL,
+                )
+            return updated
 
     def set_review_decision(
         self,
@@ -309,51 +326,56 @@ class ProcessingService:
         candidate_id: str,
         decision: ReviewDecision,
     ) -> UpdateCandidate:
-        session = self._store.require(session_id)
-        candidate = session.get_candidate(candidate_id)
-        if candidate is None:
-            raise KeyError(candidate_id)
-        if candidate.status != MatchStatus.MATCHED and decision != ReviewDecision.EXCLUDE:
-            raise ValueError("only matched candidates can be included or approved")
-        if (
-            decision == ReviewDecision.APPROVE
-            and IDENTITY_CONFLICT_WARNING in candidate.warnings
-        ):
-            raise ValueError(
-                "cannot approve a candidate with a duplicate Pioneers product code"
-            )
-        updated = candidate.model_copy(update={"review_decision": decision})
-        session.replace_candidate(updated)
-        _invalidate_export(session)
-        return updated
+        with self._store.session_lock(session_id):
+            session = self._store.require(session_id)
+            candidate = session.get_candidate(candidate_id)
+            if candidate is None:
+                raise KeyError(candidate_id)
+            if (
+                candidate.status != MatchStatus.MATCHED
+                and decision != ReviewDecision.EXCLUDE
+            ):
+                raise ValueError("only matched candidates can be included or approved")
+            if (
+                decision == ReviewDecision.APPROVE
+                and IDENTITY_CONFLICT_WARNING in candidate.warnings
+            ):
+                raise ValueError(
+                    "cannot approve a candidate with a duplicate Pioneers product code"
+                )
+            updated = candidate.model_copy(update={"review_decision": decision})
+            session.replace_candidate(updated)
+            _invalidate_export(session)
+            return updated
 
     def export_excel(self, session_id: str) -> ExcelUpdateResult:
-        session = self._store.require(session_id)
-        if session.pioneers_path is None or not session.pioneers_path.is_file():
-            raise ValueError("Pioneers Excel has not been uploaded")
-        assert session.work_dir is not None
+        with self._store.session_lock(session_id):
+            session = self._store.require(session_id)
+            if session.pioneers_path is None or not session.pioneers_path.is_file():
+                raise ValueError("Pioneers Excel has not been uploaded")
+            assert session.work_dir is not None
 
-        # Re-apply conflict guards in case session state was loaded inconsistently.
-        guarded = apply_price_warnings(
-            session.candidates,
-            suspicious_percent_threshold=resolve_suspicious_percent_threshold(
-                request_value=session.metadata.get("suspicious_percent_threshold"),
-                default=DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
-            ),
-            conflicted_row_numbers=session.conflicted_row_numbers,
-        )
-        session.candidates = guarded
+            # Snapshot decisions under the same lock that review mutations use.
+            guarded = apply_price_warnings(
+                session.candidates,
+                suspicious_percent_threshold=resolve_suspicious_percent_threshold(
+                    request_value=session.metadata.get("suspicious_percent_threshold"),
+                    default=DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
+                ),
+                conflicted_row_numbers=session.conflicted_row_numbers,
+            )
+            session.candidates = guarded
 
-        updates = to_final_sale_updates(session.candidates)
-        if not updates:
-            raise ValueError("no approved updates available for export")
+            updates = to_final_sale_updates(session.candidates)
+            if not updates:
+                raise ValueError("no approved updates available for export")
 
-        output = session.work_dir / "pioneers_updated.xlsx"
-        if output.exists():
-            output.unlink()
-        result = update_final_sale_prices(session.pioneers_path, output, updates)
-        session.output_path = output
-        return result
+            output = session.work_dir / "pioneers_updated.xlsx"
+            if output.exists():
+                output.unlink()
+            result = update_final_sale_prices(session.pioneers_path, output, updates)
+            session.output_path = output
+            return result
 
     def preview_summary(self, session: ProcessingSession) -> dict[str, object]:
         exportable = sum(1 for c in session.candidates if is_exportable(c))

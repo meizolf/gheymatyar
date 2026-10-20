@@ -1,57 +1,38 @@
-import { useEffect, useState } from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { Layout } from './components/Layout'
+import { MappingsPage } from './pages/MappingsPage'
+import { SettingsPage } from './pages/SettingsPage'
+import { WizardPage } from './pages/WizardPage'
+import { WorkflowProvider } from './workflow/WorkflowContext'
+import './components/ui/ui.css'
 import './App.css'
 
-type HealthStatus = 'loading' | 'ok' | 'error'
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+      staleTime: 5_000,
+    },
+  },
+})
 
-function App() {
-  const [status, setStatus] = useState<HealthStatus>('loading')
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function checkHealth() {
-      try {
-        const response = await fetch('/api/health')
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`)
-        }
-        const data: unknown = await response.json()
-        if (
-          !cancelled &&
-          typeof data === 'object' &&
-          data !== null &&
-          'status' in data &&
-          (data as { status: unknown }).status === 'ok'
-        ) {
-          setStatus('ok')
-        } else if (!cancelled) {
-          setStatus('error')
-        }
-      } catch {
-        if (!cancelled) {
-          setStatus('error')
-        }
-      }
-    }
-
-    void checkHealth()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const statusLabel =
-    status === 'loading' ? 'loading' : status === 'ok' ? 'ok' : 'error'
-
+export default function App() {
   return (
-    <main className="app">
-      <h1>Pioneers Price Updater</h1>
-      <p className="subtitle">GheymatYar</p>
-      <p className={`status status-${status}`} aria-live="polite">
-        Backend status: <strong>{statusLabel}</strong>
-      </p>
-    </main>
+    <QueryClientProvider client={queryClient}>
+      <WorkflowProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route element={<Layout />}>
+              <Route index element={<WizardPage />} />
+              <Route path="mappings" element={<MappingsPage />} />
+              <Route path="settings" element={<SettingsPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </WorkflowProvider>
+    </QueryClientProvider>
   )
 }
-
-export default App

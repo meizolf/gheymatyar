@@ -134,3 +134,28 @@ class SettingsUpdateRequest(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: str
+
+
+class MappingResponse(BaseModel):
+    id: int
+    supplier_key: str
+    supplier_name_raw: str
+    supplier_name_normalized: str
+    pioneers_name_raw: str
+    pioneers_name_normalized: str
+    pioneers_code: str | None = None
+    mapping_type: str
+    created_at: str
+    updated_at: str
+
+
+class MappingsListResponse(BaseModel):
+    supplier_key: str
+    mappings: list[MappingResponse]
+
+
+class MappingUpdateRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    pioneers_name_raw: str = Field(..., min_length=1)
+    pioneers_code: str | None = None

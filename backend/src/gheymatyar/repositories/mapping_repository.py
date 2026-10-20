@@ -205,3 +205,15 @@ class MappingRepository:
             mapping_type=mapping_type,
             supplier_name_raw=supplier_name_raw,
         )
+
+    def get_by_id(self, mapping_id: int) -> ProductMappingRecord | None:
+        row = self._session.get(ProductMappingRow, mapping_id)
+        return _to_record(row) if row is not None else None
+
+    def delete(self, mapping_id: int) -> None:
+        """Remove a mapping by primary key. Raises MappingNotFoundError if missing."""
+        row = self._session.get(ProductMappingRow, mapping_id)
+        if row is None:
+            raise MappingNotFoundError(f"no mapping with id={mapping_id}")
+        self._session.delete(row)
+        flush_or_rollback(self._session)

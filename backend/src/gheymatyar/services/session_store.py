@@ -64,12 +64,18 @@ class ProcessingSession:
 
 
 class SessionStore:
-    """Thread-safe in-memory session map with temp-file cleanup."""
+    """Thread-safe in-memory session map with temp-file cleanup.
+
+    In addition to the map lock, each session has a dedicated ``RLock`` so
+    mutating operations (review, confirm, match, upload, export) are serialized
+    per session even across concurrent HTTP requests.
+    """
 
     def __init__(self, *, ttl_seconds: int = 6 * 60 * 60) -> None:
         self._ttl = ttl_seconds
         self._lock = threading.RLock()
         self._sessions: dict[str, ProcessingSession] = {}
+        self._session_locks: dict[str, threading.RLock] = {}
 
     def create(self) -> ProcessingSession:
         self.cleanup_expired()
@@ -82,6 +88,7 @@ class SessionStore:
         )
         with self._lock:
             self._sessions[session_id] = session
+            self._session_locks[session_id] = threading.RLock()
         return session
 
     def get(self, session_id: str) -> ProcessingSession | None:
@@ -100,6 +107,19 @@ class SessionStore:
             raise KeyError(session_id)
         return session
 
+    def session_lock(self, session_id: str) -> threading.RLock:
+        """Return the per-session mutation lock (creates nothing if missing)."""
+        with self._lock:
+            lock = self._session_locks.get(session_id)
+            if lock is None:
+                # Session may have expired; still return a throwaway lock so
+                # callers that fail on require() don't deadlock.
+                if session_id not in self._sessions:
+                    return threading.RLock()
+                lock = threading.RLock()
+                self._session_locks[session_id] = lock
+            return lock
+
     def delete(self, session_id: str) -> None:
         with self._lock:
             self._delete_unlocked(session_id)
@@ -117,6 +137,7 @@ class SessionStore:
 
     def _delete_unlocked(self, session_id: str) -> None:
         session = self._sessions.pop(session_id, None)
+        self._session_locks.pop(session_id, None)
         if session and session.work_dir and session.work_dir.exists():
             shutil.rmtree(session.work_dir, ignore_errors=True)
 

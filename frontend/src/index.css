@@ -1,11 +1,24 @@
-:root {
-  --text: #4a5568;
-  --text-h: #1a202c;
-  --bg: #f7fafc;
-  --border: #e2e8f0;
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap');
 
-  font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
-  line-height: 1.5;
+:root {
+  --text: #334155;
+  --text-h: #0f172a;
+  --text-muted: #64748b;
+  --bg: #eef2f6;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --border: #d8e0ea;
+  --accent: #0f766e;
+  --accent-hover: #0d9488;
+  --accent-ring: rgba(15, 118, 110, 0.28);
+  --danger: #b91c1c;
+  --danger-bg: #fef2f2;
+  --warn-bg: #fffbeb;
+  --ok-bg: #ecfdf5;
+  --info-bg: #eff6ff;
+
+  font-family: 'Vazirmatn', Tahoma, sans-serif;
+  line-height: 1.6;
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
@@ -14,15 +27,47 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
 body {
   margin: 0;
   min-width: 320px;
+  direction: rtl;
 }
 
 #root {
   min-height: 100svh;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
 }
