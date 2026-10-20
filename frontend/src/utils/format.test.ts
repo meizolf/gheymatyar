@@ -28,10 +28,10 @@ describe('formatFileSize', () => {
 })
 
 describe('file validators', () => {
-  it('accepts xlsx only', () => {
+  it('accepts xlsx and xls, rejects xlsm', () => {
     expect(isExcelFile(new File([], 'a.xlsx'))).toBe(true)
+    expect(isExcelFile(new File([], 'a.xls'))).toBe(true)
     expect(isExcelFile(new File([], 'a.xlsm'))).toBe(false)
-    expect(isExcelFile(new File([], 'a.xls'))).toBe(false)
   })
 
   it('accepts pdf only', () => {

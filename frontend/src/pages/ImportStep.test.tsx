@@ -61,7 +61,7 @@ describe('ImportStep', () => {
     ).toBeInTheDocument()
   })
 
-  it('rejects non-xlsx excel files client-side', async () => {
+  it('rejects xlsm excel files client-side', async () => {
     renderImport()
     await screen.findByRole('option', { name: 'آذین لوله' })
     const excelInput = document.querySelectorAll(
@@ -74,7 +74,7 @@ describe('ImportStep', () => {
       }),
     )
     expect(
-      await screen.findByText(/فقط فایل \.xlsx پشتیبانی می‌شود/),
+      await screen.findByText(/فقط فایل \.xlsx یا \.xls پشتیبانی می‌شود/),
     ).toBeInTheDocument()
     expect(api.uploadPioneersExcel).not.toHaveBeenCalled()
   })
@@ -134,6 +134,46 @@ describe('ImportStep', () => {
     expect(screen.getByText(/پذیرفته‌شده توسط سرور/)).toBeInTheDocument()
   })
 
+  it('accepts and uploads legacy .xls files', async () => {
+    vi.mocked(api.uploadPioneersExcel).mockResolvedValue({
+      session_id: 'sess-1',
+      supplier_key: null,
+      supplier_display_name: null,
+      pioneers_filename: 'گزارش.xls',
+      pdf_filename: null,
+      product_count: 12,
+      invalid_row_count: 0,
+      invalid_rows: [],
+      duplicate_codes: {},
+      supplier_item_count: 0,
+      matched_count: 0,
+      unmatched_count: 0,
+      ambiguous_count: 0,
+      warning_count: 0,
+      exportable_count: 0,
+      parse_warnings: [],
+      export_available: false,
+    })
+    renderImport()
+    await screen.findByRole('option', { name: 'آذین لوله' })
+    const excelInput = document.querySelectorAll(
+      'input[type="file"]',
+    )[0] as HTMLInputElement
+    expect(excelInput.accept).toMatch(/\.xls/)
+    const file = new File(['<Html>'], 'گزارش.xls', {
+      type: 'application/vnd.ms-excel',
+    })
+    setFileInput(excelInput, file)
+    await waitFor(() => {
+      expect(api.uploadPioneersExcel).toHaveBeenCalled()
+    })
+    const [, uploadedFile] = vi.mocked(api.uploadPioneersExcel).mock.calls[0]
+    expect(uploadedFile).toBeInstanceOf(File)
+    expect(uploadedFile.name).toBe('گزارش.xls')
+    expect(await screen.findByText(/12/)).toBeInTheDocument()
+    expect(screen.getAllByText(/گزارش\.xls/).length).toBeGreaterThan(0)
+  })
+
   it('keeps prior accepted excel when replacement upload fails', async () => {
     vi.mocked(api.uploadPioneersExcel)
       .mockResolvedValueOnce({
@@ -155,7 +195,9 @@ describe('ImportStep', () => {
         parse_warnings: [],
         export_available: false,
       })
-      .mockRejectedValueOnce(new ApiError(400, 'expected an .xlsx Excel upload'))
+      .mockRejectedValueOnce(
+        new ApiError(400, 'expected an .xlsx or .xls Excel upload'),
+      )
 
     renderImport()
     await screen.findByRole('option', { name: 'آذین لوله' })

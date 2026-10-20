@@ -13,6 +13,12 @@ from sqlalchemy.orm import Session
 from gheymatyar.domain.enums import MappingType, MatchStatus, ReviewDecision
 from gheymatyar.domain.update_candidate import UpdateCandidate
 from gheymatyar.parsers.pioneers_excel_parser import PioneersExcelParser
+from gheymatyar.parsers.pioneers_html_xls import convert_pioneers_html_xls_to_xlsx
+from gheymatyar.parsers.workbook_format import (
+    WorkbookFormat,
+    detect_workbook_format,
+    unsupported_format_message,
+)
 from gheymatyar.repositories.mapping_repository import MappingRepository
 from gheymatyar.repositories.settings_repository import SettingsRepository
 from gheymatyar.repositories.supplier_repository import SupplierRepository
@@ -91,20 +97,48 @@ class ProcessingService:
             session = self._store.require(session_id)
             assert session.work_dir is not None
             safe_name = _safe_filename(filename, default="pioneers.xlsx")
-            if not safe_name.lower().endswith(".xlsx"):
-                raise ValueError("expected an .xlsx Excel upload")
+            lower = safe_name.lower()
+            if lower.endswith(".xlsm"):
+                raise ValueError(
+                    "expected an .xlsx or .xls Excel upload (.xlsm is not supported)"
+                )
+            if not (lower.endswith(".xlsx") or lower.endswith(".xls")):
+                raise ValueError(
+                    "expected an .xlsx or .xls Excel upload (.xlsm is not supported)"
+                )
 
-            staging = session.work_dir / f"pioneers.staging.{uuid4().hex}.xlsx"
-            staging.write_bytes(stream.read())
+            raw = stream.read()
+            fmt = detect_workbook_format(raw)
+            upload_suffix = ".xls" if lower.endswith(".xls") else ".xlsx"
+            token = uuid4().hex
+            upload_staging = (
+                session.work_dir / f"pioneers.upload.{token}{upload_suffix}"
+            )
+            # Build the replacement workbook beside the current one so a failed
+            # re-upload never destroys the previously accepted file.
+            candidate = session.work_dir / f"pioneers.candidate.{token}.xlsx"
+            final = session.work_dir / "pioneers.xlsx"
+            upload_staging.write_bytes(raw)
             try:
-                parse_result = self._parser.parse(staging)
+                if fmt == WorkbookFormat.XLSX:
+                    if not lower.endswith(".xlsx"):
+                        raise ValueError(
+                            "file contents are .xlsx but the filename extension is not .xlsx"
+                        )
+                    upload_staging.replace(candidate)
+                elif fmt == WorkbookFormat.PIONEERS_HTML_XLS:
+                    convert_pioneers_html_xls_to_xlsx(upload_staging, candidate)
+                    upload_staging.unlink(missing_ok=True)
+                else:
+                    raise ValueError(unsupported_format_message(raw))
+
+                parse_result = self._parser.parse(candidate)
             except Exception:
-                staging.unlink(missing_ok=True)
+                upload_staging.unlink(missing_ok=True)
+                candidate.unlink(missing_ok=True)
                 raise
 
-            final = session.work_dir / "pioneers.xlsx"
-            staging.replace(final)
-
+            candidate.replace(final)
             session.pioneers_filename = safe_name
             session.pioneers_path = final
             session.products = list(parse_result.products)

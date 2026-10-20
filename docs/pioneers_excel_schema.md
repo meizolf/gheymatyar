@@ -5,10 +5,15 @@ Source of truth for this document:
 - Filename: `گزارش لیست کالا - converted.xlsx`
 - Inspected: 2026-10-07
 - Tool: openpyxl (read-only)
+- Original HTML `.xls` re-inspected: 2026-10-20 — `گزارش لیست کالا(1).xls` (UTF-8 BOM HTML `<Table>`, 6775 rows × 40 columns)
 
-The earlier attachment `گزارش لیست کالا - Copy.xls` was an Excel HTML frameset without its companion `_files/` folder and could not be used. This schema is based only on the converted `.xlsx`.
+The earlier attachment `گزارش لیست کالا - Copy.xls` was an Excel HTML frameset without its companion `_files/` folder and could not be used. The product schema below was first confirmed from the converted `.xlsx`. The Oct 2026 original HTML `.xls` uses the same 40 headers and column order; GheymatYar detects HTML-based `.xls` by content, converts an internal working `.xlsx` copy, then reuses the existing parser/writer. The source `.xls` is never modified.
+
+HTML→XLSX conversion preserves cell values, column order, and row order. It does **not** preserve per-cell HTML styles (B Yekan, borders, background), `dir`/`align` attributes, or the HTML wrapper itself.
 
 Do not treat this document as a guess. Items that could not be confirmed from the file are listed under **Unknowns**.
+
+**Pioneers re-import:** Successful `.xlsx` generation does not prove Pioneers will accept the file. Verify with an actual import into Pioneers.
 
 ---
 

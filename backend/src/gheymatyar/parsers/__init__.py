@@ -12,6 +12,11 @@ from gheymatyar.parsers.pioneers_excel_parser import (
     PioneersExcelParser,
     PioneersParseResult,
 )
+from gheymatyar.parsers.pioneers_html_xls import (
+    convert_pioneers_html_xls_to_xlsx,
+    read_pioneers_html_xls_rows,
+)
+from gheymatyar.parsers.workbook_format import WorkbookFormat, detect_workbook_format
 
 __all__ = [
     "AmbiguousMappedHeaderError",
@@ -22,4 +27,8 @@ __all__ = [
     "PioneersExcelParser",
     "PioneersParseResult",
     "SheetNotFoundError",
+    "WorkbookFormat",
+    "convert_pioneers_html_xls_to_xlsx",
+    "detect_workbook_format",
+    "read_pioneers_html_xls_rows",
 ]

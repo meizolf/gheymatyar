@@ -46,7 +46,8 @@ export const MATCH_TYPE_LABEL: Record<string, string> = {
 
 export function isExcelFile(file: File): boolean {
   const name = file.name.toLowerCase()
-  return name.endsWith('.xlsx')
+  if (name.endsWith('.xlsm')) return false
+  return name.endsWith('.xlsx') || name.endsWith('.xls')
 }
 
 export function isPdfFile(file: File): boolean {

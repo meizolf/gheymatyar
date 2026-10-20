@@ -159,7 +159,7 @@ export function ImportStep() {
 
   function onExcelSelect(file: File) {
     if (!isExcelFile(file)) {
-      setExcelError('فقط فایل .xlsx پشتیبانی می‌شود (.xlsm مجاز نیست)')
+      setExcelError('فقط فایل .xlsx یا .xls پشتیبانی می‌شود (.xlsm مجاز نیست)')
       return
     }
     if (uploadExcel.isPending || uploadPdf.isPending || matchMutation.isPending || busy) {
@@ -234,8 +234,8 @@ export function ImportStep() {
 
       <div className="form-grid">
         <FileDropzone
-          label="اکسل پایونیرز (.xlsx)"
-          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          label="اکسل پایونیرز (.xlsx / .xls)"
+          accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
           pendingFile={pendingExcel}
           acceptedFilename={summary?.pioneers_filename}
           uploading={uploadExcel.isPending}

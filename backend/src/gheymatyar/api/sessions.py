@@ -62,10 +62,13 @@ async def upload_pioneers_excel(
     file: UploadFile = File(...),
     service: ProcessingService = Depends(get_processing_service),
 ) -> UploadExcelResponse:
-    if not file.filename or not file.filename.lower().endswith(".xlsx"):
+    name = (file.filename or "").lower()
+    if name.endswith(".xlsm") or not (
+        name.endswith(".xlsx") or name.endswith(".xls")
+    ):
         raise HTTPException(
             status_code=400,
-            detail="expected an .xlsx Excel upload (.xlsm is not supported)",
+            detail="expected an .xlsx or .xls Excel upload (.xlsm is not supported)",
         )
     try:
         service.upload_pioneers_excel(session_id, file.filename, file.file)

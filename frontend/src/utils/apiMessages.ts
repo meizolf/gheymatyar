@@ -6,8 +6,16 @@ const PATTERNS: Array<{ re: RegExp; fa: string | ((m: RegExpMatchArray) => strin
     fa: 'جلسه منقضی شده — لطفاً دوباره فایل‌ها را بارگذاری کنید.',
   },
   {
+    re: /expected an \.xlsx or \.xls/i,
+    fa: 'فقط فایل اکسل با پسوند .xlsx یا .xls پذیرفته می‌شود (.xlsm مجاز نیست).',
+  },
+  {
     re: /expected an \.xlsx/i,
-    fa: 'فقط فایل اکسل با پسوند .xlsx پذیرفته می‌شود (.xlsm مجاز نیست).',
+    fa: 'فقط فایل اکسل با پسوند .xlsx یا .xls پذیرفته می‌شود (.xlsm مجاز نیست).',
+  },
+  {
+    re: /unsupported Excel format|Not a Pioneers HTML|binary Excel \.xls/i,
+    fa: 'فرمت فایل اکسل پشتیبانی نمی‌شود. فایل .xlsx یا خروجی HTML پایونیرز با پسوند .xls ارسال کنید.',
   },
   {
     re: /expected a \.pdf/i,
