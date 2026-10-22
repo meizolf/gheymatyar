@@ -80,6 +80,12 @@ class CandidateResponse(BaseModel):
     status: str
     review_decision: str
     warnings: list[str] = Field(default_factory=list)
+    pricing_blockers: list[str] = Field(default_factory=list)
+    source_currency: str | None = None
+    price_basis: str | None = None
+    tax_state: str | None = None
+    source_page: int | None = None
+    source_unit: str | None = None
     suggestions: list[dict[str, Any]] = Field(default_factory=list)
     exportable: bool = False
     supplier_name_normalized: str | None = None

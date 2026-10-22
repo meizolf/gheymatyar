@@ -36,6 +36,7 @@ from gheymatyar.services.price_validation import (
     DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
     IDENTITY_CONFLICT_WARNING,
     apply_price_warnings,
+    apply_sale_compatibility,
     is_exportable,
     resolve_suspicious_percent_threshold,
     to_final_sale_updates,
@@ -45,6 +46,53 @@ from gheymatyar.suppliers.registry import SupplierProcessorRegistry, get_default
 
 _SAFE_FILENAME_RE = re.compile(r"[^\w.\-()+ \u0600-\u06FF]+", re.UNICODE)
 SETTING_THRESHOLD_KEY = "suspicious_percent_threshold"
+SETTING_SALE_CURRENCY_KEY = "pioneers_sale_currency"
+SETTING_SALE_BASIS_KEY = "pioneers_sale_basis"
+
+
+def _setting_text(db_session: Session, key: str) -> str | None:
+    row = SettingsRepository(db_session).get(key)
+    if row is None:
+        return None
+    text = str(row.value).strip()
+    return text or None
+
+
+def _stored_sale_policy(db_session: Session) -> tuple[str | None, str | None]:
+    return (
+        _setting_text(db_session, SETTING_SALE_CURRENCY_KEY),
+        _setting_text(db_session, SETTING_SALE_BASIS_KEY),
+    )
+
+
+def _remember_sale_policy(
+    session: ProcessingSession, currency: str | None, basis: str | None
+) -> None:
+    session.metadata["pioneers_sale_currency"] = currency or ""
+    session.metadata["pioneers_sale_basis"] = basis or ""
+
+
+def _policy_from_session(session: ProcessingSession) -> tuple[str | None, str | None]:
+    currency = str(session.metadata.get("pioneers_sale_currency") or "").strip()
+    basis = str(session.metadata.get("pioneers_sale_basis") or "").strip()
+    return currency or None, basis or None
+
+
+def _refresh_sale_compatibility(session: ProcessingSession) -> list[UpdateCandidate]:
+    currency, basis = _policy_from_session(session)
+    by_row = {product.row_number: product for product in session.products}
+    refreshed: list[UpdateCandidate] = []
+    for candidate in session.candidates:
+        product = by_row.get(candidate.row_number) if candidate.row_number else None
+        if candidate.status == MatchStatus.MATCHED and product is not None:
+            candidate = apply_sale_compatibility(
+                candidate,
+                target_unit=product.unit,
+                confirmed_currency=currency,
+                confirmed_basis=basis,
+            )
+        refreshed.append(candidate)
+    return refreshed
 
 
 def _safe_filename(name: str, *, default: str) -> str:
@@ -230,11 +278,15 @@ class ProcessingService:
             for row in mapping_repo.list_for_supplier(supplier_row.id)
         ]
 
+        sale_currency, sale_basis = _stored_sale_policy(db_session)
+        _remember_sale_policy(session, sale_currency, sale_basis)
         match_result = match_supplier_items(
             session.supplier_items,
             session.products,
             processor=processor,
             saved_mappings=saved,
+            confirmed_sale_currency=sale_currency,
+            confirmed_sale_basis=sale_basis,
         )
 
         saved_setting = SettingsRepository(db_session).get(SETTING_THRESHOLD_KEY)
@@ -326,8 +378,22 @@ class ProcessingService:
                 match_type=MappingType.MANUAL,
                 status=MatchStatus.MATCHED,
                 review_decision=ReviewDecision.INCLUDE,
-                warnings=[],
+                warnings=list(candidate.pricing_blockers),
+                pricing_blockers=list(candidate.pricing_blockers),
+                source_currency=candidate.source_currency,
+                price_basis=candidate.price_basis,
+                tax_state=candidate.tax_state,
+                source_page=candidate.source_page,
+                source_unit=candidate.source_unit,
                 suggestions=[],
+            )
+            sale_currency, sale_basis = _stored_sale_policy(db_session)
+            _remember_sale_policy(session, sale_currency, sale_basis)
+            updated = apply_sale_compatibility(
+                updated,
+                target_unit=product.unit,
+                confirmed_currency=sale_currency,
+                confirmed_basis=sale_basis,
             )
             threshold = resolve_suspicious_percent_threshold(
                 request_value=session.metadata.get("suspicious_percent_threshold"),
@@ -370,6 +436,10 @@ class ProcessingService:
                 and decision != ReviewDecision.EXCLUDE
             ):
                 raise ValueError("only matched candidates can be included or approved")
+            if decision == ReviewDecision.APPROVE and candidate.pricing_blockers:
+                raise ValueError(
+                    "cannot approve a candidate while a supplier price restriction is unresolved"
+                )
             if (
                 decision == ReviewDecision.APPROVE
                 and IDENTITY_CONFLICT_WARNING in candidate.warnings
@@ -382,16 +452,57 @@ class ProcessingService:
             _invalidate_export(session)
             return updated
 
-    def export_excel(self, session_id: str) -> ExcelUpdateResult:
+    def revalidate_open_sessions(self, db_session: Session) -> None:
+        """Apply the saved sale policy to every open session and drop old workbooks.
+
+        Approvals made under the previous confirmation do not carry forward.
+        """
+        currency, basis = _stored_sale_policy(db_session)
+        for session in self._store.snapshot():
+            with self._store.session_lock(session.session_id):
+                current = self._store.get(session.session_id)
+                if current is None:
+                    continue
+                _remember_sale_policy(current, currency, basis)
+                if current.candidates:
+                    reset: list[UpdateCandidate] = []
+                    for candidate in current.candidates:
+                        if candidate.review_decision in {
+                            ReviewDecision.APPROVE,
+                            ReviewDecision.INCLUDE,
+                        }:
+                            candidate = candidate.model_copy(
+                                update={"review_decision": ReviewDecision.EXCLUDE}
+                            )
+                        reset.append(candidate)
+                    current.candidates = reset
+                    current.candidates = apply_price_warnings(
+                        _refresh_sale_compatibility(current),
+                        suspicious_percent_threshold=resolve_suspicious_percent_threshold(
+                            request_value=current.metadata.get(
+                                "suspicious_percent_threshold"
+                            ),
+                            default=DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
+                        ),
+                        conflicted_row_numbers=current.conflicted_row_numbers,
+                    )
+                _invalidate_export(current)
+
+    def export_excel(
+        self, session_id: str, db_session: Session | None = None
+    ) -> ExcelUpdateResult:
         with self._store.session_lock(session_id):
             session = self._store.require(session_id)
             if session.pioneers_path is None or not session.pioneers_path.is_file():
                 raise ValueError("Pioneers Excel has not been uploaded")
             assert session.work_dir is not None
 
+            if db_session is not None:
+                _remember_sale_policy(session, *_stored_sale_policy(db_session))
+
             # Snapshot decisions under the same lock that review mutations use.
             guarded = apply_price_warnings(
-                session.candidates,
+                _refresh_sale_compatibility(session),
                 suspicious_percent_threshold=resolve_suspicious_percent_threshold(
                     request_value=session.metadata.get("suspicious_percent_threshold"),
                     default=DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
@@ -402,6 +513,7 @@ class ProcessingService:
 
             updates = to_final_sale_updates(session.candidates)
             if not updates:
+                _invalidate_export(session)
                 raise ValueError("no approved updates available for export")
 
             output = session.work_dir / "pioneers_updated.xlsx"
@@ -497,6 +609,12 @@ def candidate_to_dict(candidate: UpdateCandidate) -> dict[str, object]:
         "status": candidate.status.value,
         "review_decision": candidate.review_decision.value,
         "warnings": list(candidate.warnings),
+        "pricing_blockers": list(candidate.pricing_blockers),
+        "source_currency": candidate.source_currency,
+        "price_basis": candidate.price_basis,
+        "tax_state": candidate.tax_state,
+        "source_page": candidate.source_page,
+        "source_unit": candidate.source_unit,
         "suggestions": list(candidate.suggestions),
         "exportable": is_exportable(candidate),
         "supplier_name_normalized": normalize_product_name(candidate.supplier_name),

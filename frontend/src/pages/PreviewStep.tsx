@@ -21,6 +21,53 @@ import { useWorkflow } from '../workflow/WorkflowContext'
 
 type PreviewFilter = 'ALL' | 'EXPORTABLE' | 'WARNINGS' | 'EXCLUDED' | 'UNCHANGED'
 
+const CURRENCY_LABEL: Record<string, string> = {
+  rial: 'ریال',
+  toman: 'تومان',
+}
+
+const BASIS_LABEL: Record<string, string> = {
+  meter: 'هر متر',
+  piece: 'هر عدد',
+  listed: 'قیمت اعلام‌شده',
+}
+
+const TAX_LABEL: Record<string, string> = {
+  included_10_percent: '۱۰٪ ارزش افزوده در مبلغ',
+  not_stated: 'مالیات در سند نیامده',
+}
+
+function isHardBlocked(candidate: Candidate): boolean {
+  return (candidate.pricing_blockers?.length ?? 0) > 0
+}
+
+function approvableWarnings(candidate: Candidate): string[] {
+  const blocked = new Set(candidate.pricing_blockers ?? [])
+  return candidate.warnings.filter((warning) => !blocked.has(warning))
+}
+
+function provenanceText(candidate: Candidate): string {
+  const parts: string[] = []
+  if (candidate.source_currency) {
+    parts.push(
+      `ارز: ${CURRENCY_LABEL[candidate.source_currency] ?? candidate.source_currency}`,
+    )
+  }
+  if (candidate.price_basis) {
+    parts.push(
+      `مبنا: ${BASIS_LABEL[candidate.price_basis] ?? candidate.price_basis}`,
+    )
+  }
+  if (candidate.source_unit) parts.push(`واحد: ${candidate.source_unit}`)
+  if (candidate.tax_state) {
+    parts.push(
+      `مالیات: ${TAX_LABEL[candidate.tax_state] ?? candidate.tax_state}`,
+    )
+  }
+  if (candidate.source_page) parts.push(`صفحه ${candidate.source_page}`)
+  return parts.join(' · ')
+}
+
 function candidateFilter(c: Candidate, filter: PreviewFilter): boolean {
   const oldP = c.old_price
   const newP = c.new_price
@@ -282,24 +329,35 @@ export function PreviewStep() {
               </tr>
             ) : (
               pager.pageItems.map((c) => {
-                const hasWarnings = c.warnings.length > 0
+                const blocked = isHardBlocked(c)
+                const softWarnings = approvableWarnings(c)
                 const excluded = c.review_decision === 'EXCLUDE'
                 const needsApprove =
-                  hasWarnings && c.review_decision !== 'APPROVE'
+                  !blocked &&
+                  softWarnings.length > 0 &&
+                  c.review_decision !== 'APPROVE'
+                const provenance = provenanceText(c)
                 return (
                   <tr
                     key={c.candidate_id}
                     className={
-                      excluded
-                        ? 'row-excluded'
-                        : needsApprove
-                          ? 'row-warn'
-                          : c.exportable
-                            ? 'row-ok'
-                            : ''
+                      blocked
+                        ? 'row-blocked'
+                        : excluded
+                          ? 'row-excluded'
+                          : needsApprove
+                            ? 'row-warn'
+                            : c.exportable
+                              ? 'row-ok'
+                              : ''
                     }
                   >
-                    <td>{c.supplier_name}</td>
+                    <td>
+                      {c.supplier_name}
+                      {provenance ? (
+                        <div className="provenance">{provenance}</div>
+                      ) : null}
+                    </td>
                     <td>{c.pioneers_name ?? '—'}</td>
                     <td className="ltr">{formatPrice(c.old_price)}</td>
                     <td className="ltr">{formatPrice(c.new_price)}</td>
@@ -310,21 +368,25 @@ export function PreviewStep() {
                     <td>
                       <Badge
                         tone={
-                          c.exportable
-                            ? 'ok'
-                            : needsApprove
-                              ? 'warn'
-                              : excluded
-                                ? 'neutral'
-                                : 'danger'
+                          blocked
+                            ? 'danger'
+                            : c.exportable
+                              ? 'ok'
+                              : needsApprove
+                                ? 'warn'
+                                : excluded
+                                  ? 'neutral'
+                                  : 'danger'
                         }
                       >
-                        {c.exportable
-                          ? 'معتبر'
-                          : needsApprove
-                            ? 'نیاز به تأیید هشدار'
-                            : (REVIEW_LABEL[c.review_decision] ??
-                              c.review_decision)}
+                        {blocked
+                          ? 'مسدود'
+                          : c.exportable
+                            ? 'معتبر'
+                            : needsApprove
+                              ? 'نیاز به تأیید هشدار'
+                              : (REVIEW_LABEL[c.review_decision] ??
+                                c.review_decision)}
                       </Badge>
                     </td>
                     <td>
@@ -340,7 +402,10 @@ export function PreviewStep() {
                     </td>
                     <td>
                       <div className="row-actions">
-                        {excluded && hasWarnings ? (
+                        {blocked ? (
+                          <span className="blocked-note">تأیید ممکن نیست</span>
+                        ) : null}
+                        {!blocked && excluded && softWarnings.length > 0 ? (
                           <Button
                             size="sm"
                             disabled={opsPending}
@@ -354,7 +419,7 @@ export function PreviewStep() {
                             تأیید هشدار و شامل کردن
                           </Button>
                         ) : null}
-                        {excluded && !hasWarnings ? (
+                        {!blocked && excluded && softWarnings.length === 0 ? (
                           <Button
                             size="sm"
                             variant="secondary"
@@ -369,7 +434,7 @@ export function PreviewStep() {
                             شامل کردن
                           </Button>
                         ) : null}
-                        {!excluded && needsApprove ? (
+                        {!blocked && !excluded && needsApprove ? (
                           <Button
                             size="sm"
                             disabled={opsPending}

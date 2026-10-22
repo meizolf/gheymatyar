@@ -6,48 +6,19 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
+from tests.confirmed_metre import prepare_two_exportable_metre_rows
+
 
 def test_excluded_row_not_updated_in_download(
-    client, pioneers_azin_excel: Path, azin_pdf: Path, tmp_path: Path
+    client, pioneers_azin_excel: Path, dina_pdf: Path, tmp_path: Path
 ) -> None:
-    session_id = client.post("/api/sessions").json()["session_id"]
-    with pioneers_azin_excel.open("rb") as handle:
-        client.post(
-            f"/api/sessions/{session_id}/pioneers-excel",
-            files={
-                "file": (
-                    "p.xlsx",
-                    handle,
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
-            },
-        )
-    with azin_pdf.open("rb") as handle:
-        client.post(
-            f"/api/sessions/{session_id}/supplier-pdf",
-            data={"supplier_key": "azin_pipe"},
-            files={"file": ("azin.pdf", handle, "application/pdf")},
-        )
-    client.post(f"/api/sessions/{session_id}/match")
-
-    preview = client.get(f"/api/sessions/{session_id}/preview").json()["candidates"]
-    matched = [c for c in preview if c["status"] == "MATCHED"]
-    assert len(matched) >= 2
-
-    keep, drop = matched[0], matched[1]
-    client.post(
-        f"/api/sessions/{session_id}/candidates/{keep['candidate_id']}/review",
-        json={"decision": "APPROVE"},
+    session_id, keep, drop = prepare_two_exportable_metre_rows(
+        client, pioneers_azin_excel, dina_pdf, tmp_path
     )
     client.post(
         f"/api/sessions/{session_id}/candidates/{drop['candidate_id']}/review",
         json={"decision": "EXCLUDE"},
     )
-    for c in matched[2:]:
-        client.post(
-            f"/api/sessions/{session_id}/candidates/{c['candidate_id']}/review",
-            json={"decision": "EXCLUDE"},
-        )
 
     export = client.post(f"/api/sessions/{session_id}/export")
     assert export.status_code == 200

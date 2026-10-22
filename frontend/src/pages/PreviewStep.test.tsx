@@ -87,6 +87,42 @@ describe('PreviewStep', () => {
     expect(screen.getByText(/به‌روزرسانی خروجی/)).toBeInTheDocument()
   })
 
+  it('does not offer approval for a hard-blocked row', async () => {
+    const blocked = {
+      ...candidatesResponseFixture.candidates[1],
+      review_decision: 'EXCLUDE',
+      exportable: false,
+      warnings: [
+        'price basis: supplier price is per metre and the Pioneers unit is \'شاخه 6 متری\'; no conversion was applied and automatic export is blocked',
+      ],
+      pricing_blockers: [
+        'price basis: supplier price is per metre and the Pioneers unit is \'شاخه 6 متری\'; no conversion was applied and automatic export is blocked',
+      ],
+      source_currency: 'rial',
+      price_basis: 'meter',
+      source_unit: 'متر',
+      tax_state: 'not_stated',
+      source_page: 1,
+    }
+    vi.mocked(api.preview).mockResolvedValue({
+      ...candidatesResponseFixture,
+      candidates: [blocked],
+    } as never)
+    renderPreview()
+    expect(await screen.findByText('مسدود')).toBeInTheDocument()
+    expect(screen.getByText('تأیید ممکن نیست')).toBeInTheDocument()
+    const provenance = document.querySelector('.provenance')
+    expect(provenance?.textContent).toContain('مبنا: هر متر')
+    expect(provenance?.textContent).toContain('واحد: متر')
+    expect(provenance?.textContent).toContain('صفحه 1')
+    expect(
+      screen.queryByRole('button', { name: 'تأیید هشدار و شامل کردن' }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'تأیید هشدار' }),
+    ).not.toBeInTheDocument()
+  })
+
   it('approves warned updates', async () => {
     const user = userEvent.setup()
     vi.mocked(api.setReview).mockResolvedValue({

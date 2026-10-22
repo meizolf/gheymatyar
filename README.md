@@ -90,11 +90,23 @@ See [docs/windows_packaging.md](docs/windows_packaging.md) for the full guide.
 
 macOS cannot produce the Windows EXE; use the Actions artifact or a Windows build host.
 
-### Supported supplier
+### Supplier support
 
-| Key | Display name | Sample PDF |
+Only `نرخ فروش اصلی` is written. Printed amounts are not converted, multiplied by carton or meterage, or adjusted for VAT. The workbook has no currency or unit column. Until settings confirm that the sale column is Rial and, when a row has no unit, per metre or per piece, export stays blocked. A per-metre price is never written onto a branch unit such as `شاخه 6 متری`. A supplier amount whose own basis is only “as listed” stays blocked as well, including آذین، نیوپایپ، and آبراهان. Rows with an unresolved price stay blocked after mapping confirmation and after APPROVE.
+
+| Key | List | Price handling |
 |---|---|---|
-| `azin_pipe` | آذین لوله | `fixtures/suppliers/458_124550609784457.pdf` |
+| `azin_pipe` | آذین لوله | Printed Rial, 10% VAT included. Direct replacement. |
+| `top_industrial` | گروه صنعتی تاپ | Printed Toman. Export blocked until a Rial rule is confirmed. |
+| `dina_polymer` | دینا پلیمر | Rial. Pipe prices stay per meter. Fitting rows under `#N/A` are blocked. |
+| `newpipe` | نیوپایپ | Printed Rial, 10% VAT included. Package length is not multiplied. Same name with different prices is blocked. |
+| `abrahan_pipe` | آبراهان | Printed cash Rial. `موجود` rows are skipped. VAT is not stated. |
+
+The Pioneers workbook has no currency or unit column. These processors do not invent a conversion into that cell.
+
+Pars Plast, PG 234 (Polymer Golpayegan), and Kaveh Gostar are **not supported**. Their pages are image-only or the embedded font does not expose the printed prices. Offline Persian OCR is not bundled, and Windows offline OCR has not been verified, so those keys stay unregistered and return HTTP 400.
+
+Windows onedir packaging and import of the updated workbook into the Pioneers desktop app are not verified from this macOS tree.
 
 See [docs/adding_a_supplier.md](docs/adding_a_supplier.md).
 

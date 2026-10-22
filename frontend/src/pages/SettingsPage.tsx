@@ -7,10 +7,14 @@ import { Button } from '../components/ui/Button'
 import { Spinner } from '../components/ui/Spinner'
 
 const THRESHOLD_KEY = 'suspicious_percent_threshold'
+const CURRENCY_KEY = 'pioneers_sale_currency'
+const BASIS_KEY = 'pioneers_sale_basis'
 
 export function SettingsPage() {
   const queryClient = useQueryClient()
   const [threshold, setThreshold] = useState('30')
+  const [saleCurrency, setSaleCurrency] = useState('')
+  const [saleBasis, setSaleBasis] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -20,18 +24,29 @@ export function SettingsPage() {
   })
 
   useEffect(() => {
-    if (settingsQuery.data?.settings[THRESHOLD_KEY]) {
-      setThreshold(settingsQuery.data.settings[THRESHOLD_KEY])
-    }
+    const stored = settingsQuery.data?.settings
+    if (!stored) return
+    if (stored[THRESHOLD_KEY]) setThreshold(stored[THRESHOLD_KEY])
+    setSaleCurrency(stored[CURRENCY_KEY] ?? '')
+    setSaleBasis(stored[BASIS_KEY] ?? '')
   }, [settingsQuery.data])
 
   const saveMutation = useMutation({
     mutationFn: () =>
-      api.updateSettings({ [THRESHOLD_KEY]: threshold.trim() }),
+      api.updateSettings({
+        [THRESHOLD_KEY]: threshold.trim(),
+        [CURRENCY_KEY]: saleCurrency,
+        [BASIS_KEY]: saleBasis,
+      }),
     onSuccess: async () => {
       setMessage('تنظیمات ذخیره شد.')
       setError(null)
-      await queryClient.invalidateQueries({ queryKey: ['settings'] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['settings'] }),
+        queryClient.invalidateQueries({ queryKey: ['preview'] }),
+        queryClient.invalidateQueries({ queryKey: ['candidates'] }),
+        queryClient.invalidateQueries({ queryKey: ['session'] }),
+      ])
     },
     onError: (err) => {
       setMessage(null)
@@ -79,6 +94,40 @@ export function SettingsPage() {
             <p className="field-hint">
               تغییرات مطلق بیش از این درصد نیاز به تأیید صریح دارند. مقدار پیش‌فرض
               سرور: ۳۰
+            </p>
+          </div>
+          <div className="field" style={{ maxWidth: 420 }}>
+            <label htmlFor="sale-currency">ارز نرخ فروش اصلی</label>
+            <select
+              id="sale-currency"
+              value={saleCurrency}
+              onChange={(e) => setSaleCurrency(e.target.value)}
+            >
+              <option value="">تأیید نشده</option>
+              <option value="rial">ریال، بدون تبدیل مبلغ</option>
+            </select>
+            <p className="field-hint">
+              فایل پایونیرز ستون ارز ندارد. انتخاب ریال فقط تأیید می‌کند که نرخ
+              فروش اصلی ریالی است و هیچ مبلغی را ضرب یا تبدیل نمی‌کند.
+            </p>
+          </div>
+          <div className="field" style={{ maxWidth: 420 }}>
+            <label htmlFor="sale-basis">مبنای نرخ فروش وقتی واحد در اکسل نیست</label>
+            <select
+              id="sale-basis"
+              value={saleBasis}
+              onChange={(e) => setSaleBasis(e.target.value)}
+            >
+              <option value="">تأیید نشده</option>
+              <option value="meter">هر متر</option>
+              <option value="piece">هر عدد</option>
+            </select>
+            <p className="field-hint">
+              اگر خود ردیف واحد داشته باشد، همان واحد ملاک است. قیمت هر متر روی
+              شاخه نوشته نمی‌شود و متراژ بسته در قیمت ضرب نمی‌شود. قیمتی که در
+              سند تأمین‌کننده واحد هر متر یا هر عدد ندارد، بعد از این تأیید هم
+              خروجی نمی‌شود. تغییر یا پاک کردن ارز یا مبنا، نشست‌های باز را
+              دوباره بررسی می‌کند و فایل اکسل ساخته‌شده را باطل می‌کند.
             </p>
           </div>
 

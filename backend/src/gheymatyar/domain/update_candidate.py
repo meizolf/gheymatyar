@@ -34,6 +34,13 @@ class UpdateCandidate(BaseModel):
     status: MatchStatus
     review_decision: ReviewDecision = ReviewDecision.INCLUDE
     warnings: list[str] = Field(default_factory=list)
+    # Monetary restrictions that confirmation and APPROVE must not clear.
+    pricing_blockers: list[str] = Field(default_factory=list)
+    source_currency: str | None = None
+    price_basis: str | None = None
+    tax_state: str | None = None
+    source_page: int | None = None
+    source_unit: str | None = None
     suggestions: list[dict[str, Any]] = Field(default_factory=list)
 
     @field_validator("candidate_id", "supplier_name", mode="before")
@@ -74,6 +81,22 @@ class UpdateCandidate(BaseModel):
                 raise ValueError("warnings must be a list of strings")
             text = item.strip()
             if text:
+                cleaned.append(text)
+        return cleaned
+
+    @field_validator("pricing_blockers", mode="before")
+    @classmethod
+    def _pricing_blockers(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("pricing_blockers must be a list of strings")
+        cleaned: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError("pricing_blockers must be a list of strings")
+            text = item.strip()
+            if text and text not in cleaned:
                 cleaned.append(text)
         return cleaned
 

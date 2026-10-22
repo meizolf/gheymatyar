@@ -25,7 +25,11 @@ def test_session_lock_serializes_exclude_before_export_snapshot(
         service.upload_pioneers_excel(session.session_id, "p.xlsx", handle)
 
     session = service.get_session(session.session_id)
+    session.metadata["pioneers_sale_currency"] = "rial"
+    session.metadata["pioneers_sale_basis"] = "piece"
     # Seed two matched exportable candidates pointing at real product rows.
+    # The workbook itself has no unit column; this test states an explicit
+    # per-piece Rial confirmation so the lock behaviour can still export.
     products = session.products[:2]
     assert len(products) == 2
     candidates = []
@@ -47,6 +51,9 @@ def test_session_lock_serializes_exclude_before_export_snapshot(
                 review_decision=ReviewDecision.INCLUDE,
                 warnings=[],
                 suggestions=[],
+                source_currency="rial",
+                price_basis="piece",
+                source_unit="عدد",
             )
         )
     session.candidates = candidates

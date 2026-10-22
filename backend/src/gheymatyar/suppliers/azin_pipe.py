@@ -353,6 +353,9 @@ class AzinPipeProcessor(BaseSupplierProcessor):
                 "column": column,
                 "table_row": row_index,
                 "price_raw": price_raw,
+                "currency": "rial",
+                "price_basis": "listed",
+                "tax": "included_10_percent",
             },
         )
         return item, None

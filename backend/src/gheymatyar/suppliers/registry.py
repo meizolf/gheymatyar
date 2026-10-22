@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from gheymatyar.suppliers.abrahan_pipe import AbrahanPipeProcessor
 from gheymatyar.suppliers.azin_pipe import AzinPipeProcessor
 from gheymatyar.suppliers.base import BaseSupplierProcessor
+from gheymatyar.suppliers.dina_polymer import DinaPolymerProcessor
 from gheymatyar.suppliers.errors import UnsupportedSupplierError
+from gheymatyar.suppliers.newpipe import NewPipeProcessor
+from gheymatyar.suppliers.top_industrial import TopIndustrialProcessor
 
 __all__ = [
     "SupplierInfo",
@@ -65,5 +69,9 @@ def get_default_registry() -> SupplierProcessorRegistry:
     if _DEFAULT is None:
         registry = SupplierProcessorRegistry()
         registry.register(AzinPipeProcessor())
+        registry.register(TopIndustrialProcessor())
+        registry.register(DinaPolymerProcessor())
+        registry.register(NewPipeProcessor())
+        registry.register(AbrahanPipeProcessor())
         _DEFAULT = registry
     return _DEFAULT

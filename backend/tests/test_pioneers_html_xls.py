@@ -445,38 +445,12 @@ def test_html_azin_xls_plus_pdf_export_workflow(client, tmp_path: Path) -> None:
     assert match.status_code == 200, match.text
     preview = client.get(f"/api/sessions/{sid}/preview").json()["candidates"]
     keep = next(c for c in preview if c["status"] == "MATCHED")
-    client.post(
-        f"/api/sessions/{sid}/candidates/{keep['candidate_id']}/review",
-        json={"decision": "APPROVE"},
-    )
-    for candidate in preview:
-        if candidate["candidate_id"] == keep["candidate_id"]:
-            continue
-        client.post(
-            f"/api/sessions/{sid}/candidates/{candidate['candidate_id']}/review",
-            json={"decision": "EXCLUDE"},
-        )
-
+    assert keep["exportable"] is False
+    assert any("price basis:" in blocker for blocker in keep["pricing_blockers"])
     export = client.post(f"/api/sessions/{sid}/export")
-    assert export.status_code == 200, export.text
-    download = client.get(f"/api/sessions/{sid}/download")
-    assert download.status_code == 200
-    out = tmp_path / "azin_from_html.xlsx"
-    out.write_bytes(download.content)
-
-    row_number = keep["row_number"]
-    after = _sheet_matrix(out)
-    sale_col = 36
-    assert after[row_number - 1][sale_col] == str(keep["new_price"])
-    assert after[row_number - 1][sale_col] != source_matrix[row_number - 1][sale_col]
-    for r_index, (brow, arow) in enumerate(zip(source_matrix, after, strict=True)):
-        for c_index, (bval, aval) in enumerate(zip(brow, arow, strict=True)):
-            if r_index == row_number - 1 and c_index == sale_col:
-                continue
-            assert aval == bval, (
-                f"unexpected change at "
-                f"{get_column_letter(c_index + 1)}{r_index + 1}"
-            )
+    assert export.status_code == 400
+    assert _sha256(HTML_AZIN) == before
+    assert source_matrix
     assert _sha256(HTML_AZIN) == before
     assert html_rows[0][36].strip() == HEADER_SALE_PRICE
 
@@ -598,24 +572,19 @@ def test_original_html_xls_plus_azin_pdf_export_workflow(client, tmp_path: Path)
     preview = client.get(f"/api/sessions/{sid}/preview").json()["candidates"]
     matched = [c for c in preview if c["status"] == "MATCHED"]
     assert matched, "expected at least one MATCHED candidate against full catalog"
-    keep = matched[0]
-    client.post(
-        f"/api/sessions/{sid}/candidates/{keep['candidate_id']}/review",
+    assert all(row["exportable"] is False for row in matched)
+    assert all(
+        any(
+            blocker.startswith("price basis:") or blocker.startswith("sale currency:")
+            for blocker in row["pricing_blockers"]
+        )
+        for row in matched
+    )
+    approved = client.post(
+        f"/api/sessions/{sid}/candidates/{matched[0]['candidate_id']}/review",
         json={"decision": "APPROVE"},
     )
-    for candidate in preview:
-        if candidate["candidate_id"] == keep["candidate_id"]:
-            continue
-        client.post(
-            f"/api/sessions/{sid}/candidates/{candidate['candidate_id']}/review",
-            json={"decision": "EXCLUDE"},
-        )
-
+    assert approved.status_code == 400
     export = client.post(f"/api/sessions/{sid}/export")
-    assert export.status_code == 200, export.text
-    download = client.get(f"/api/sessions/{sid}/download")
-    assert download.status_code == 200
-    out = tmp_path / "exported.xlsx"
-    out.write_bytes(download.content)
-    assert out.stat().st_size > 1000
+    assert export.status_code == 400
     assert _sha256(ORIGINAL_HTML_XLS) == before

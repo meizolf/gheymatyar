@@ -107,6 +107,11 @@ class SessionStore:
             raise KeyError(session_id)
         return session
 
+    def snapshot(self) -> list[ProcessingSession]:
+        """Return live sessions without holding the map lock."""
+        with self._lock:
+            return list(self._sessions.values())
+
     def session_lock(self, session_id: str) -> threading.RLock:
         """Return the per-session mutation lock (creates nothing if missing)."""
         with self._lock:

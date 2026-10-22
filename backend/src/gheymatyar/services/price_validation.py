@@ -69,6 +69,9 @@ def apply_price_warnings(
         warnings = [
             w for w in candidate.warnings if w != IDENTITY_CONFLICT_WARNING
         ]
+        for blocker in candidate.pricing_blockers:
+            if blocker not in warnings:
+                warnings.append(blocker)
         if (
             candidate.row_number is not None
             and candidate.row_number in conflicted
@@ -112,6 +115,162 @@ def apply_price_warnings(
     return enriched
 
 
+_BASIS_PREFIX = "price basis:"
+_CURRENCY_PREFIX = "sale currency:"
+
+TARGET_BASIS_UNRESOLVED = (
+    "price basis: Pioneers price basis is not on the workbook and was not confirmed; "
+    "automatic export is blocked"
+)
+SOURCE_BASIS_UNRESOLVED = (
+    "price basis: supplier price basis is not an explicit per-metre or per-piece price; "
+    "automatic export is blocked until the unit is confirmed"
+)
+CURRENCY_UNRESOLVED = (
+    "sale currency: Pioneers sale currency is not confirmed; "
+    "no conversion was applied and automatic export is blocked"
+)
+SUPPLIER_CURRENCY_MISSING = (
+    "sale currency: supplier currency was not stated; "
+    "automatic export is blocked"
+)
+
+
+def _compatibility_text(text: str) -> bool:
+    return text.startswith(_BASIS_PREFIX) or text.startswith(_CURRENCY_PREFIX)
+
+
+def _classify_unit_text(unit: str) -> str | None:
+    """Map an explicit unit label. Branch wins over metre in «شاخه 6 متری»."""
+    compact = unit.replace(" ", "").replace("\u200c", "")
+    if "شاخه" in unit:
+        return "branch"
+    if compact in {"متر", "مترطول", "m", "meter", "metre"} or compact.startswith("هرمتر"):
+        return "meter"
+    if compact in {"عدد", "دانه", "piece"}:
+        return "piece"
+    return None
+
+
+def _classify_source(unit: str | None, basis: str | None) -> str:
+    if unit and unit.strip():
+        kind = _classify_unit_text(unit.strip())
+        if kind:
+            return kind
+    if basis == "meter":
+        return "meter"
+    if basis == "piece":
+        return "piece"
+    return "unresolved"
+
+
+def _classify_target(unit: str | None, confirmed_basis: str | None) -> str:
+    if unit and unit.strip():
+        return _classify_unit_text(unit.strip()) or "unresolved"
+    if confirmed_basis in {"meter", "piece"}:
+        return confirmed_basis
+    return "unresolved"
+
+
+def _source_phrase(kind: str) -> str:
+    return {"meter": "per metre", "piece": "per piece", "branch": "per branch"}[kind]
+
+
+def _target_phrase(kind: str, unit: str | None) -> str:
+    if unit and unit.strip():
+        return repr(unit.strip())
+    if kind == "meter":
+        return "the confirmed per-metre sale basis"
+    if kind == "piece":
+        return "the confirmed per-piece sale basis"
+    return "an unresolved unit"
+
+
+def normalize_sale_policy(
+    currency: str | None, basis: str | None
+) -> tuple[str | None, str | None]:
+    """Accept only an explicit Rial confirmation and an explicit metre or piece basis.
+
+    Any other value, including a blank workbook, stays unconfirmed. Nothing here
+    converts Toman to Rial or metres to a branch.
+    """
+    confirmed_currency = (currency or "").strip().lower()
+    confirmed_basis = (basis or "").strip().lower()
+    return (
+        confirmed_currency if confirmed_currency == "rial" else None,
+        confirmed_basis if confirmed_basis in {"meter", "piece"} else None,
+    )
+
+
+def compatibility_blockers(
+    *,
+    source_unit: str | None,
+    price_basis: str | None,
+    source_currency: str | None,
+    target_unit: str | None,
+    confirmed_currency: str | None,
+    confirmed_basis: str | None,
+) -> list[str]:
+    """Hard blocks for a matched row. Package quantities are never read."""
+    currency, basis = normalize_sale_policy(confirmed_currency, confirmed_basis)
+    blockers: list[str] = []
+    source_kind = _classify_source(source_unit, price_basis)
+    target_kind = _classify_target(target_unit, basis)
+    if source_kind == "unresolved":
+        blockers.append(SOURCE_BASIS_UNRESOLVED)
+    elif target_kind == "unresolved":
+        blockers.append(TARGET_BASIS_UNRESOLVED)
+    elif source_kind != target_kind:
+        blockers.append(
+            "price basis: supplier price is "
+            f"{_source_phrase(source_kind)} and the Pioneers unit is "
+            f"{_target_phrase(target_kind, target_unit)}; "
+            "no conversion was applied and automatic export is blocked"
+        )
+
+    stated = (source_currency or "").strip().lower()
+    if not stated:
+        blockers.append(SUPPLIER_CURRENCY_MISSING)
+    elif currency is None:
+        blockers.append(CURRENCY_UNRESOLVED)
+    elif stated != currency:
+        blockers.append(
+            "sale currency: supplier currency "
+            f"{stated} does not match confirmed Pioneers currency {currency}; "
+            "no conversion was applied and automatic export is blocked"
+        )
+    return blockers
+
+
+def apply_sale_compatibility(
+    candidate: UpdateCandidate,
+    *,
+    target_unit: str | None,
+    confirmed_currency: str | None,
+    confirmed_basis: str | None,
+) -> UpdateCandidate:
+    """Replace currency/basis blockers. Other restrictions stay in place."""
+    fresh = compatibility_blockers(
+        source_unit=candidate.source_unit,
+        price_basis=candidate.price_basis,
+        source_currency=candidate.source_currency,
+        target_unit=target_unit,
+        confirmed_currency=confirmed_currency,
+        confirmed_basis=confirmed_basis,
+    )
+    blockers = [item for item in candidate.pricing_blockers if not _compatibility_text(item)]
+    for item in fresh:
+        if item not in blockers:
+            blockers.append(item)
+    warnings = [item for item in candidate.warnings if not _compatibility_text(item)]
+    for item in fresh:
+        if item not in warnings:
+            warnings.append(item)
+    return candidate.model_copy(
+        update={"pricing_blockers": blockers, "warnings": warnings}
+    )
+
+
 def is_exportable(candidate: UpdateCandidate) -> bool:
     """Whether a candidate may be written into the output Excel."""
     if candidate.status != MatchStatus.MATCHED:
@@ -119,6 +278,8 @@ def is_exportable(candidate: UpdateCandidate) -> bool:
     if candidate.row_number is None or not candidate.pioneers_name:
         return False
     if candidate.new_price is None or candidate.new_price <= 0:
+        return False
+    if candidate.pricing_blockers:
         return False
     if IDENTITY_CONFLICT_WARNING in candidate.warnings:
         return False

@@ -12,6 +12,7 @@ from gheymatyar.domain.product import PioneersProduct
 from gheymatyar.domain.supplier_item import SupplierPriceItem
 from gheymatyar.domain.update_candidate import UpdateCandidate
 from gheymatyar.services.name_normalization import name_similarity, normalize_product_name
+from gheymatyar.services.price_validation import apply_sale_compatibility
 from gheymatyar.suppliers.base import BaseSupplierProcessor
 
 
@@ -72,6 +73,88 @@ def _suggestion_payloads(
     return out
 
 
+NAME_COLLISION_BLOCKER = (
+    "supplier name is shared by products with different prices or codes; "
+    "automatic export is blocked until the names are distinct"
+)
+
+
+def _string_list(raw: object) -> list[str]:
+    if not raw:
+        return []
+    values = [raw] if isinstance(raw, str) else list(raw)  # type: ignore[arg-type]
+    cleaned: list[str] = []
+    for value in values:
+        text = str(value).strip()
+        if text and text not in cleaned:
+            cleaned.append(text)
+    return cleaned
+
+
+def _item_review_warnings(item: SupplierPriceItem) -> list[str]:
+    """Warnings stored by a supplier processor that must block automatic export."""
+    raw = item.raw_values.get("review_warnings") if item.raw_values else None
+    return _string_list(raw)
+
+
+def _hard_blockers(item: SupplierPriceItem, extras: Sequence[str]) -> list[str]:
+    """Non-overridable price restrictions from the supplier row."""
+    raw = item.raw_values or {}
+    blockers = _string_list(raw.get("pricing_blockers"))
+    for text in _item_review_warnings(item):
+        if text not in blockers:
+            blockers.append(text)
+    for text in extras:
+        if text and text not in blockers:
+            blockers.append(text)
+    return blockers
+
+
+def _optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _source_page(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _provenance(item: SupplierPriceItem, blockers: list[str]) -> dict[str, object]:
+    raw = item.raw_values or {}
+    return {
+        "pricing_blockers": blockers,
+        "source_currency": _optional_text(raw.get("currency")),
+        "price_basis": _optional_text(raw.get("price_basis")),
+        "tax_state": _optional_text(raw.get("tax")),
+        "source_page": _source_page(raw.get("page")),
+        "source_unit": _optional_text(item.unit),
+    }
+
+
+def _colliding_names(
+    items: Sequence[SupplierPriceItem],
+    processor: BaseSupplierProcessor,
+) -> set[str]:
+    """Normalized names that belong to more than one distinct supplier row."""
+    grouped: dict[str, list[SupplierPriceItem]] = {}
+    for item in items:
+        key = processor.normalize_supplier_name(item.supplier_name)
+        grouped.setdefault(key, []).append(item)
+    collisions: set[str] = set()
+    for key, group in grouped.items():
+        if len(group) < 2:
+            continue
+        prices = {item.price for item in group}
+        codes = {item.supplier_code or "" for item in group}
+        if len(prices) > 1 or len(codes) > 1:
+            collisions.add(key)
+    return collisions
+
+
 def _price_fields(
     old_price: Decimal | None, new_price: Decimal | None
 ) -> tuple[Decimal | None, Decimal | None, Decimal | None]:
@@ -92,6 +175,8 @@ def match_supplier_items(
     processor: BaseSupplierProcessor,
     saved_mappings: Iterable[SavedNameMapping] = (),
     suggestion_pool_limit: int = 8,
+    confirmed_sale_currency: str | None = None,
+    confirmed_sale_basis: str | None = None,
 ) -> MatchResult:
     """Match supplier items to Pioneers products by name.
 
@@ -109,6 +194,7 @@ def match_supplier_items(
     saved_by_supplier_name = {
         m.supplier_name_normalized: m for m in saved_mappings
     }
+    collisions = _colliding_names(items, processor)
 
     result = MatchResult()
 
@@ -117,6 +203,9 @@ def match_supplier_items(
         raw_supplier_name = item.supplier_name
         new_price = processor.calculate_final_sale_price(item)
         candidate_id = str(uuid4())
+        extras = [NAME_COLLISION_BLOCKER] if supplier_name in collisions else []
+        blockers = _hard_blockers(item, extras)
+        provenance = _provenance(item, blockers)
 
         # 1) Saved mapping
         saved = saved_by_supplier_name.get(supplier_name)
@@ -127,21 +216,27 @@ def match_supplier_items(
                     resolved.sale_price, new_price
                 )
                 result.candidates.append(
-                    UpdateCandidate(
-                        candidate_id=candidate_id,
-                        row_number=resolved.row_number,
-                        pioneers_code=resolved.code,
-                        pioneers_name=resolved.name,
-                        supplier_code=item.supplier_code,
-                        supplier_name=raw_supplier_name,
-                        old_price=resolved.sale_price,
-                        new_price=new_price,
-                        absolute_change=absolute,
-                        percentage_change=percentage,
-                        match_type=MappingType.SAVED_MAPPING,
-                        status=MatchStatus.MATCHED,
-                        review_decision=ReviewDecision.INCLUDE,
-                        warnings=[],
+                    apply_sale_compatibility(
+                        UpdateCandidate(
+                            candidate_id=candidate_id,
+                            row_number=resolved.row_number,
+                            pioneers_code=resolved.code,
+                            pioneers_name=resolved.name,
+                            supplier_code=item.supplier_code,
+                            supplier_name=raw_supplier_name,
+                            old_price=resolved.sale_price,
+                            new_price=new_price,
+                            absolute_change=absolute,
+                            percentage_change=percentage,
+                            match_type=MappingType.SAVED_MAPPING,
+                            status=MatchStatus.MATCHED,
+                            review_decision=ReviewDecision.INCLUDE,
+                            warnings=list(blockers),
+                            **provenance,
+                        ),
+                        target_unit=resolved.unit,
+                        confirmed_currency=confirmed_sale_currency,
+                        confirmed_basis=confirmed_sale_basis,
                     )
                 )
                 result.matched_count += 1
@@ -154,21 +249,27 @@ def match_supplier_items(
             product = exact_hits[0]
             absolute, _, percentage = _price_fields(product.sale_price, new_price)
             result.candidates.append(
-                UpdateCandidate(
-                    candidate_id=candidate_id,
-                    row_number=product.row_number,
-                    pioneers_code=product.code,
-                    pioneers_name=product.name,
-                    supplier_code=item.supplier_code,
-                    supplier_name=raw_supplier_name,
-                    old_price=product.sale_price,
-                    new_price=new_price,
-                    absolute_change=absolute,
-                    percentage_change=percentage,
-                    match_type=MappingType.EXACT_NAME,
-                    status=MatchStatus.MATCHED,
-                    review_decision=ReviewDecision.INCLUDE,
-                    warnings=[],
+                apply_sale_compatibility(
+                    UpdateCandidate(
+                        candidate_id=candidate_id,
+                        row_number=product.row_number,
+                        pioneers_code=product.code,
+                        pioneers_name=product.name,
+                        supplier_code=item.supplier_code,
+                        supplier_name=raw_supplier_name,
+                        old_price=product.sale_price,
+                        new_price=new_price,
+                        absolute_change=absolute,
+                        percentage_change=percentage,
+                        match_type=MappingType.EXACT_NAME,
+                        status=MatchStatus.MATCHED,
+                        review_decision=ReviewDecision.INCLUDE,
+                        warnings=list(blockers),
+                        **provenance,
+                    ),
+                    target_unit=product.unit,
+                    confirmed_currency=confirmed_sale_currency,
+                    confirmed_basis=confirmed_sale_basis,
                 )
             )
             result.matched_count += 1
@@ -203,9 +304,11 @@ def match_supplier_items(
                     status=MatchStatus.AMBIGUOUS,
                     review_decision=ReviewDecision.EXCLUDE,
                     warnings=[
-                        f"normalized name matches {len(exact_hits)} Pioneers products"
+                        f"normalized name matches {len(exact_hits)} Pioneers products",
+                        *blockers,
                     ],
                     suggestions=suggestions,
+                    **provenance,
                 )
             )
             result.ambiguous_count += 1
@@ -231,8 +334,9 @@ def match_supplier_items(
                 match_type=None,
                 status=status,
                 review_decision=ReviewDecision.EXCLUDE,
-                warnings=[],
+                warnings=list(blockers),
                 suggestions=suggestions,
+                **provenance,
             )
         )
         if status == MatchStatus.AMBIGUOUS:

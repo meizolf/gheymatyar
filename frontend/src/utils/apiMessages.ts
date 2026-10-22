@@ -62,6 +62,41 @@ const PATTERNS: Array<{ re: RegExp; fa: string | ((m: RegExpMatchArray) => strin
     fa: 'به‌خاطر کد تکراری پایونیرز نمی‌توان این مورد را تأیید کرد.',
   },
   {
+    re: /cannot approve a candidate while a supplier price restriction is unresolved/i,
+    fa: 'این محدودیت قیمت قابل تأیید نیست و خروجی خودکار مسدود می‌ماند.',
+  },
+  {
+    re: /price basis: supplier price is per metre and the Pioneers unit is (.+); no conversion was applied/i,
+    fa: (m) =>
+      `قیمت تأمین‌کننده برای هر متر است و واحد پایونیرز ${m[1]} است. تبدیلی انجام نشده و خروجی مسدود است.`,
+  },
+  {
+    re: /price basis: supplier price is per piece and the Pioneers unit is (.+); no conversion was applied/i,
+    fa: (m) =>
+      `قیمت تأمین‌کننده برای هر عدد است و واحد پایونیرز ${m[1]} است. تبدیلی انجام نشده و خروجی مسدود است.`,
+  },
+  {
+    re: /price basis: Pioneers price basis is not on the workbook and was not confirmed/i,
+    fa: 'مبنای قیمت در فایل پایونیرز نیست و تأیید نشده است. خروجی مسدود است.',
+  },
+  {
+    re: /price basis: supplier price basis is not an explicit per-metre or per-piece price/i,
+    fa: 'مبنای قیمت تأمین‌کننده به‌صورت هر متر یا هر عدد مشخص نیست. خروجی تا تأیید واحد مسدود است.',
+  },
+  {
+    re: /sale currency: Pioneers sale currency is not confirmed/i,
+    fa: 'ارز نرخ فروش پایونیرز تأیید نشده است. هیچ تبدیلی انجام نمی‌شود و خروجی مسدود است.',
+  },
+  {
+    re: /sale currency: supplier currency was not stated/i,
+    fa: 'ارز قیمت تأمین‌کننده در سند نیامده است. خروجی مسدود است.',
+  },
+  {
+    re: /sale currency: supplier currency (\S+) does not match confirmed Pioneers currency (\S+)/i,
+    fa: (m) =>
+      `ارز تأمین‌کننده (${m[1]}) با ارز تأییدشده پایونیرز (${m[2]}) یکی نیست. تبدیلی انجام نشده و خروجی مسدود است.`,
+  },
+  {
     re: /mapping not found/i,
     fa: 'نگاشت یافت نشد.',
   },

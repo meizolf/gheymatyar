@@ -64,7 +64,21 @@ def test_review_exclude_invalidates_previous_export(
             filename="a.pdf",
             stream=handle,
         )
+    session = svc.get_session(session.session_id)
+    product = session.products[0]
+    session.supplier_items = [
+        SupplierPriceItem(
+            supplier_id="azin_pipe",
+            supplier_name=product.name,
+            supplier_code="819121020",
+            price=product.sale_price or Decimal("1000"),
+            unit="عدد",
+            raw_values={"currency": "rial", "price_basis": "piece", "page": 1},
+        )
+    ]
     with db.session() as sess:
+        SettingsRepository(sess).set("pioneers_sale_currency", "rial")
+        SettingsRepository(sess).set("pioneers_sale_basis", "piece")
         svc.run_matching(session.session_id, sess)
 
     session = svc.get_session(session.session_id)
@@ -532,9 +546,13 @@ def test_name_only_product_matches_and_exports(tmp_path: Path, db: Database) -> 
             supplier_id="azin_pipe",
             supplier_name="اذین بوشن 20",
             price=Decimal("204600"),
+            unit="عدد",
+            raw_values={"currency": "rial", "price_basis": "piece", "page": 1},
         )
     ]
     with db.session() as sess:
+        SettingsRepository(sess).set("pioneers_sale_currency", "rial")
+        SettingsRepository(sess).set("pioneers_sale_basis", "piece")
         svc.run_matching(session.session_id, sess)
     session = svc.get_session(session.session_id)
     matched = next(c for c in session.candidates if c.status == MatchStatus.MATCHED)

@@ -23,6 +23,13 @@ PIONEERS_SAMPLE = FIXTURES / "pioneers" / "pioneers_sample.xlsx"
 PIONEERS_LITE = FIXTURES / "pioneers" / "pioneers_lite_sample.xlsx"
 PIONEERS_AZIN = FIXTURES / "pioneers" / "pioneers_azin_subset.xlsx"
 AZIN_PDF = FIXTURES / "suppliers" / "458_124550609784457.pdf"
+TOP_PDF = FIXTURES / "suppliers" / "top_industrial.pdf"
+DINA_PDF = FIXTURES / "suppliers" / "dina_polymer_1405_07_04.pdf"
+NEWPIPE_PDF = FIXTURES / "suppliers" / "newpipe_1405_07_18.pdf"
+ABRAHAN_PDF = FIXTURES / "suppliers" / "abrahan_pipe_1405_07_15.pdf"
+PARS_PLAST_PDF = FIXTURES / "suppliers" / "pars_plast_1405_07_11.pdf"
+KAVEH_PDF = FIXTURES / "suppliers" / "kaveh_gostar_1405_06.pdf"
+PG234_PDF = FIXTURES / "suppliers" / "pg234_1405_07_22.pdf"
 
 
 @pytest.fixture
@@ -76,6 +83,47 @@ def pioneers_azin_excel() -> Path:
     if not PIONEERS_AZIN.is_file():
         pytest.skip(f"missing Pioneers azin subset: {PIONEERS_AZIN}")
     return PIONEERS_AZIN
+
+
+def _require_pdf(path: Path) -> Path:
+    if not path.is_file():
+        pytest.skip(f"missing supplier PDF fixture: {path}")
+    return path
+
+
+@pytest.fixture(scope="module")
+def top_pdf() -> Path:
+    return _require_pdf(TOP_PDF)
+
+
+@pytest.fixture(scope="module")
+def dina_pdf() -> Path:
+    return _require_pdf(DINA_PDF)
+
+
+@pytest.fixture(scope="module")
+def newpipe_pdf() -> Path:
+    return _require_pdf(NEWPIPE_PDF)
+
+
+@pytest.fixture(scope="module")
+def abrahan_pdf() -> Path:
+    return _require_pdf(ABRAHAN_PDF)
+
+
+@pytest.fixture(scope="module")
+def pars_plast_pdf() -> Path:
+    return _require_pdf(PARS_PLAST_PDF)
+
+
+@pytest.fixture(scope="module")
+def kaveh_pdf() -> Path:
+    return _require_pdf(KAVEH_PDF)
+
+
+@pytest.fixture(scope="module")
+def pg234_pdf() -> Path:
+    return _require_pdf(PG234_PDF)
 
 
 @pytest.fixture

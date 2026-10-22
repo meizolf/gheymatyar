@@ -112,9 +112,20 @@ def test_fuzzy_never_auto_confirmed() -> None:
 
 
 def test_price_warning_blocks_export_until_approved() -> None:
-    products = [_product(sale_price=Decimal("1000000"))]
-    items = [_item(price=Decimal("2000000"))]  # +100%
-    result = match_supplier_items(items, products, processor=AzinPipeProcessor())
+    products = [_product(sale_price=Decimal("1000000"), unit="عدد")]
+    items = [
+        _item(
+            price=Decimal("2000000"),
+            unit="عدد",
+            raw_values={"currency": "rial", "price_basis": "piece"},
+        )
+    ]
+    result = match_supplier_items(
+        items,
+        products,
+        processor=AzinPipeProcessor(),
+        confirmed_sale_currency="rial",
+    )
     enriched = apply_price_warnings(result.candidates)
     assert enriched[0].warnings
     assert not is_exportable(enriched[0])

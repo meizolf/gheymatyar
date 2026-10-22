@@ -277,9 +277,10 @@ def set_review(
 def export_excel(
     session_id: str,
     service: ProcessingService = Depends(get_processing_service),
+    db: Session = Depends(get_db_session),
 ) -> ExportResponse:
     try:
-        result = service.export_excel(session_id)
+        result = service.export_excel(session_id, db)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
     except ValueError as exc:

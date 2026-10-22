@@ -64,6 +64,12 @@ export interface Candidate {
   status: MatchStatus | string
   review_decision: ReviewDecision | string
   warnings: string[]
+  pricing_blockers?: string[]
+  source_currency?: string | null
+  price_basis?: string | null
+  tax_state?: string | null
+  source_page?: number | null
+  source_unit?: string | null
   suggestions: CandidateSuggestion[]
   exportable: boolean
   supplier_name_normalized: string | null

@@ -45,8 +45,9 @@ Write-Host "Using Python: $PythonExe"
 $ExcelXlsx = Join-Path $RepoRoot "fixtures\pioneers\pioneers_azin_subset.xlsx"
 $ExcelXls = Join-Path $RepoRoot "fixtures\pioneers\pioneers_azin_subset.xls"
 $Pdf = Join-Path $RepoRoot "fixtures\suppliers\458_124550609784457.pdf"
+$DinaPdf = Join-Path $RepoRoot "fixtures\suppliers\dina_polymer_1405_07_04.pdf"
 $CompareScript = Join-Path $RepoRoot "scripts\windows\compare_export.py"
-foreach ($p in @($ExcelXlsx, $ExcelXls, $Pdf, $CompareScript)) {
+foreach ($p in @($ExcelXlsx, $ExcelXls, $Pdf, $DinaPdf, $CompareScript)) {
     if (-not (Test-Path $p)) { throw "Missing required file: $p" }
 }
 
@@ -160,7 +161,7 @@ function Wait-GheymatYarReady {
     throw "Timed out waiting for GheymatYar health on $Base/api/health"
 }
 
-function Invoke-Json {
+function Invoke-Api {
     param(
         [string]$Method,
         [string]$Url,
@@ -177,11 +178,49 @@ function Invoke-Json {
         $params.ContentType = "application/json; charset=utf-8"
         $params.Body = ($Body | ConvertTo-Json -Compress -Depth 8)
     }
-    $resp = Invoke-WebRequest @params
-    if ($resp.Content) {
-        return $resp.Content | ConvertFrom-Json
+    $status = 0
+    $text = ""
+    if ($PSVersionTable.PSVersion.Major -ge 7) {
+        $params.SkipHttpErrorCheck = $true
+        $resp = Invoke-WebRequest @params
+        $status = [int]$resp.StatusCode
+        $text = [string]$resp.Content
+    } else {
+        try {
+            $resp = Invoke-WebRequest @params
+            $status = [int]$resp.StatusCode
+            $text = [string]$resp.Content
+        } catch {
+            $response = $_.Exception.Response
+            if ($null -eq $response) { throw }
+            $status = [int]$response.StatusCode
+            $stream = $response.GetResponseStream()
+            if ($null -ne $stream) {
+                $reader = New-Object System.IO.StreamReader($stream)
+                $text = $reader.ReadToEnd()
+                $reader.Dispose()
+            }
+        }
     }
-    return $null
+    $parsed = $null
+    if ($text) {
+        try { $parsed = $text | ConvertFrom-Json } catch { $parsed = $null }
+    }
+    return [pscustomobject]@{ StatusCode = $status; Body = $parsed; Text = $text }
+}
+
+function Invoke-Json {
+    param(
+        [string]$Method,
+        [string]$Url,
+        [object]$Body = $null,
+        [hashtable]$Headers = @{}
+    )
+    $result = Invoke-Api -Method $Method -Url $Url -Body $Body -Headers $Headers
+    if ($result.StatusCode -lt 200 -or $result.StatusCode -ge 300) {
+        throw "$Method $Url failed HTTP $($result.StatusCode): $($result.Text)"
+    }
+    return $result.Body
 }
 
 function Invoke-Multipart {
@@ -226,7 +265,10 @@ function Invoke-Workflow {
         [string]$ExcelPath,
         [string]$Label,
         [switch]$SaveMapping,
-        [switch]$HtmlXls
+        [switch]$HtmlXls,
+        [string]$SupplierKey = "azin_pipe",
+        [string]$PdfPath = $Pdf,
+        [switch]$ExpectBlocked
     )
 
     $sourceSha = Get-FileSha256 $ExcelPath
@@ -250,9 +292,9 @@ function Invoke-Workflow {
     Write-Host "OK excel upload ($Label)"
 
     $null = Invoke-Multipart -Url "$Base/api/sessions/$sid/supplier-pdf" `
-        -FormFields @{ supplier_key = "azin_pipe" } `
+        -FormFields @{ supplier_key = $SupplierKey } `
         -FileField "file" `
-        -FilePath $Pdf `
+        -FilePath $PdfPath `
         -ContentType "application/pdf"
     Write-Host "OK pdf upload"
 
@@ -300,9 +342,38 @@ function Invoke-Workflow {
         }
     }
 
-    $null = Invoke-Json -Method POST `
+    $approved = Invoke-Api -Method POST `
         -Url "$Base/api/sessions/$sid/candidates/$($keep.candidate_id)/review" `
         -Body @{ decision = "APPROVE" }
+    if ($ExpectBlocked) {
+        if ($approved.StatusCode -lt 400) {
+            throw "blocked $Label review was accepted (HTTP $($approved.StatusCode))"
+        }
+        $blockedExport = Invoke-Api -Method POST -Url "$Base/api/sessions/$sid/export"
+        if ($blockedExport.StatusCode -ne 400) {
+            throw "blocked $Label export expected HTTP 400, got $($blockedExport.StatusCode): $($blockedExport.Text)"
+        }
+        $blockedDownload = Invoke-Api -Method GET -Url "$Base/api/sessions/$sid/download"
+        if ($blockedDownload.StatusCode -ne 404) {
+            throw "blocked $Label download expected HTTP 404, got $($blockedDownload.StatusCode)"
+        }
+        $afterSha = Get-FileSha256 $ExcelPath
+        if ($afterSha -ne $sourceSha) {
+            throw "Source fixture was mutated during $Label workflow"
+        }
+        Write-Host "OK blocked export ($Label) review=$($approved.StatusCode) export=400"
+        return @{
+            SavedMappingKey = $savedMappingKey
+            Keep = $keep
+            OutPath = $null
+        }
+    }
+    if ($approved.StatusCode -ne 200) {
+        throw "$Label APPROVE failed HTTP $($approved.StatusCode): $($approved.Text)"
+    }
+    if ($approved.Body.pricing_blockers -and @($approved.Body.pricing_blockers).Count -gt 0) {
+        throw "$Label approved a row that still has pricing blockers"
+    }
 
     foreach ($c in $candidates) {
         if ($c.candidate_id -eq $keep.candidate_id) { continue }
@@ -351,6 +422,110 @@ function Invoke-Workflow {
     }
 }
 
+function Invoke-ConfirmedMetreExport {
+    param([string]$ExcelPath)
+
+    $null = Invoke-Json -Method PUT -Url "$Base/api/settings" -Body @{
+        settings = @{
+            pioneers_sale_currency = "rial"
+            pioneers_sale_basis = "meter"
+            suspicious_percent_threshold = "30"
+        }
+    }
+    Write-Host "OK confirmed Rial per-metre sale policy"
+
+    $sourceSha = Get-FileSha256 $ExcelPath
+    $session = Invoke-Json -Method POST -Url "$Base/api/sessions"
+    $sid = $session.session_id
+    $null = Invoke-Multipart -Url "$Base/api/sessions/$sid/pioneers-excel" `
+        -FormFields @{} `
+        -FileField "file" `
+        -FilePath $ExcelPath `
+        -ContentType "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    $null = Invoke-Multipart -Url "$Base/api/sessions/$sid/supplier-pdf" `
+        -FormFields @{ supplier_key = "dina_polymer" } `
+        -FileField "file" `
+        -FilePath $DinaPdf `
+        -ContentType "application/pdf"
+    $match = Invoke-Json -Method POST -Url "$Base/api/sessions/$sid/match" -Body @{}
+    $pipe = $match.candidates | Where-Object {
+        ($_.price_basis -eq "meter") -and (($null -eq $_.pricing_blockers) -or (@($_.pricing_blockers).Count -eq 0))
+    } | Select-Object -First 1
+    if (-not $pipe) { throw "no explicit per-metre Dina row without a hard blocker" }
+
+    $query = -join @([char]0x0644, [char]0x0648, [char]0x0644, [char]0x0647)
+    $escaped = [uri]::EscapeDataString($query)
+    $search = Invoke-Json -Method GET -Url "$Base/api/sessions/$sid/pioneers-products/search?q=$escaped"
+    if (-not $search.results -or @($search.results).Count -lt 1) {
+        throw "Pioneers search returned no row for the Dina metre export"
+    }
+    $rowNumber = [int]$search.results[0].row_number
+    $confirmed = Invoke-Json -Method POST `
+        -Url "$Base/api/sessions/$sid/candidates/$($pipe.candidate_id)/confirm-mapping" `
+        -Body @{ pioneers_row_number = $rowNumber; save = $true }
+    if ($confirmed.pricing_blockers -and @($confirmed.pricing_blockers).Count -gt 0) {
+        throw "confirmed Dina metre row is still blocked: $($confirmed.pricing_blockers -join ' | ')"
+    }
+    if (-not $confirmed.exportable) {
+        $approved = Invoke-Api -Method POST `
+            -Url "$Base/api/sessions/$sid/candidates/$($pipe.candidate_id)/review" `
+            -Body @{ decision = "APPROVE" }
+        if ($approved.StatusCode -ne 200 -or -not $approved.Body.exportable) {
+            throw "compatible Dina metre APPROVE failed HTTP $($approved.StatusCode): $($approved.Text)"
+        }
+        $confirmed = $approved.Body
+    }
+
+    foreach ($c in $match.candidates) {
+        if ($c.candidate_id -eq $pipe.candidate_id) { continue }
+        try {
+            Invoke-Json -Method POST `
+                -Url "$Base/api/sessions/$sid/candidates/$($c.candidate_id)/review" `
+                -Body @{ decision = "EXCLUDE" } | Out-Null
+        } catch {
+            # Unmatched rows that cannot be excluded do not become exportable.
+        }
+    }
+
+    $export = Invoke-Api -Method POST -Url "$Base/api/sessions/$sid/export"
+    if ($export.StatusCode -ne 200 -or $export.Body.updated_count -lt 1) {
+        throw "Dina metre export failed HTTP $($export.StatusCode): $($export.Text)"
+    }
+    $outXlsx = Join-Path $DataDir "smoke-out-dina-metre.xlsx"
+    Invoke-WebRequest -Uri "$Base/api/sessions/$sid/download" -OutFile $outXlsx -UseBasicParsing -TimeoutSec 120
+    $expected = [string]$confirmed.new_price
+    & $PythonExe -c @"
+from decimal import Decimal
+from openpyxl import load_workbook
+header = ''.join(chr(cp) for cp in (0x0646,0x0631,0x062E,0x0020,0x0641,0x0631,0x0648,0x0634,0x0020,0x0627,0x0635,0x0644,0x06CC))
+wb = load_workbook(r'$outXlsx')
+ws = wb.active
+headers = {cell.value: cell.column for cell in ws[1]}
+value = ws.cell($rowNumber, headers[header]).value
+wb.close()
+if Decimal(str(value)) != Decimal('$expected'):
+    raise SystemExit('sale cell %s != %s' % (value, '$expected'))
+"@
+    if ($LASTEXITCODE -ne 0) { throw "Dina metre sale cell was not the supplier price" }
+
+    $compareArgs = @(
+        $CompareScript,
+        "--source", $ExcelPath,
+        "--exported", $outXlsx,
+        "--source-sha256", $sourceSha
+    )
+    & $PythonExe @compareArgs
+    if ($LASTEXITCODE -ne 0) { throw "compare_export failed for dina-metre" }
+    if ((Get-FileSha256 $ExcelPath) -ne $sourceSha) {
+        throw "Source fixture was mutated during the Dina metre export"
+    }
+    $saved = Invoke-Json -Method GET -Url "$Base/api/suppliers/dina_polymer/mappings"
+    if (-not $saved.mappings -or @($saved.mappings).Count -lt 1) {
+        throw "Dina mapping was not saved"
+    }
+    Write-Host "OK Dina metre export row=$rowNumber price=$expected"
+}
+
 $smokeFailed = $false
 try {
     Start-GheymatYar
@@ -389,8 +564,9 @@ try {
     }
     Write-Host "OK foreign Host rejected on GET /api/settings"
 
-    $null = Invoke-Workflow -ExcelPath $ExcelXlsx -Label "xlsx" -SaveMapping
-    $null = Invoke-Workflow -ExcelPath $ExcelXls -Label "xls" -HtmlXls
+    $null = Invoke-Workflow -ExcelPath $ExcelXlsx -Label "xlsx" -SaveMapping -ExpectBlocked
+    $null = Invoke-Workflow -ExcelPath $ExcelXls -Label "xls" -HtmlXls -ExpectBlocked
+    Invoke-ConfirmedMetreExport -ExcelPath $ExcelXlsx
 
     $mappingsBefore = Invoke-Json -Method GET -Url "$Base/api/suppliers/azin_pipe/mappings"
     if (-not $mappingsBefore.mappings -or $mappingsBefore.mappings.Count -lt 1) {
@@ -445,4 +621,4 @@ if ($smokeFailed) {
     throw "Packaged smoke test failed"
 }
 
-Write-Host "Packaged smoke test passed (xlsx + html-xls + mapping restart + formula/sheet compare)."
+Write-Host "Packaged smoke test passed (blocked Azin export + Dina metre export + mapping restart)."

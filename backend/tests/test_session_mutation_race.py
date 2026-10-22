@@ -6,61 +6,7 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-
-def _prepare_two_exportable(
-    client, pioneers_azin_excel: Path, azin_pdf: Path
-) -> tuple[str, dict, dict]:
-    session_id = client.post("/api/sessions").json()["session_id"]
-    with pioneers_azin_excel.open("rb") as handle:
-        assert (
-            client.post(
-                f"/api/sessions/{session_id}/pioneers-excel",
-                files={
-                    "file": (
-                        "p.xlsx",
-                        handle,
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
-                },
-            ).status_code
-            == 200
-        )
-    with azin_pdf.open("rb") as handle:
-        assert (
-            client.post(
-                f"/api/sessions/{session_id}/supplier-pdf",
-                data={"supplier_key": "azin_pipe"},
-                files={"file": ("azin.pdf", handle, "application/pdf")},
-            ).status_code
-            == 200
-        )
-    assert client.post(f"/api/sessions/{session_id}/match").status_code == 200
-
-    preview = client.get(f"/api/sessions/{session_id}/preview").json()["candidates"]
-    matched = [c for c in preview if c["status"] == "MATCHED"]
-    assert len(matched) >= 2
-    keep, drop = matched[0], matched[1]
-
-    client.post(
-        f"/api/sessions/{session_id}/candidates/{keep['candidate_id']}/review",
-        json={"decision": "APPROVE"},
-    )
-    client.post(
-        f"/api/sessions/{session_id}/candidates/{drop['candidate_id']}/review",
-        json={"decision": "APPROVE"},
-    )
-    for c in matched[2:]:
-        client.post(
-            f"/api/sessions/{session_id}/candidates/{c['candidate_id']}/review",
-            json={"decision": "EXCLUDE"},
-        )
-
-    preview2 = client.get(f"/api/sessions/{session_id}/preview").json()["candidates"]
-    keep = next(c for c in preview2 if c["candidate_id"] == keep["candidate_id"])
-    drop = next(c for c in preview2 if c["candidate_id"] == drop["candidate_id"])
-    assert keep["exportable"] is True
-    assert drop["exportable"] is True
-    return session_id, keep, drop
+from tests.confirmed_metre import prepare_two_exportable_metre_rows
 
 
 def _sale_price_at(path: Path, row_number: int) -> str:
@@ -77,11 +23,11 @@ def _sale_price_at(path: Path, row_number: int) -> str:
 
 
 def test_order_exclude_then_export_omits_excluded_row(
-    client, pioneers_azin_excel: Path, azin_pdf: Path, tmp_path: Path
+    client, pioneers_azin_excel: Path, dina_pdf: Path, tmp_path: Path
 ) -> None:
     """Intended order: exclusion completes before export snapshots."""
-    session_id, keep, drop = _prepare_two_exportable(
-        client, pioneers_azin_excel, azin_pdf
+    session_id, keep, drop = prepare_two_exportable_metre_rows(
+        client, pioneers_azin_excel, dina_pdf, tmp_path
     )
 
     exclude = client.post(
@@ -109,11 +55,11 @@ def test_order_exclude_then_export_omits_excluded_row(
 
 
 def test_order_export_then_exclude_invalidates_stale_download(
-    client, pioneers_azin_excel: Path, azin_pdf: Path, tmp_path: Path
+    client, pioneers_azin_excel: Path, dina_pdf: Path, tmp_path: Path
 ) -> None:
     """Opposite order: export first, then exclude must invalidate that export."""
-    session_id, keep, drop = _prepare_two_exportable(
-        client, pioneers_azin_excel, azin_pdf
+    session_id, keep, drop = prepare_two_exportable_metre_rows(
+        client, pioneers_azin_excel, dina_pdf, tmp_path
     )
 
     export = client.post(f"/api/sessions/{session_id}/export")

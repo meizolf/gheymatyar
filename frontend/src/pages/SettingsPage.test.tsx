@@ -17,11 +17,13 @@ function renderSettings() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(
+  client.setQueryData(['preview', 'open-session'], { candidates: [] })
+  const view = render(
     <QueryClientProvider client={client}>
       <SettingsPage />
     </QueryClientProvider>,
   )
+  return { client, ...view }
 }
 
 describe('SettingsPage', () => {
@@ -36,7 +38,7 @@ describe('SettingsPage', () => {
     vi.mocked(api.updateSettings).mockResolvedValue({
       settings: { suspicious_percent_threshold: '25' },
     })
-    renderSettings()
+    const { client } = renderSettings()
     const input = await screen.findByLabelText(/آستانه هشدار/)
     expect(input).toHaveValue('30')
     await user.clear(input)
@@ -45,8 +47,15 @@ describe('SettingsPage', () => {
     await waitFor(() => {
       expect(api.updateSettings).toHaveBeenCalledWith({
         suspicious_percent_threshold: '25',
+        pioneers_sale_currency: '',
+        pioneers_sale_basis: '',
       })
     })
     expect(await screen.findByText(/تنظیمات ذخیره شد/)).toBeInTheDocument()
+    await waitFor(() => {
+      expect(client.getQueryState(['preview', 'open-session'])?.isInvalidated).toBe(
+        true,
+      )
+    })
   })
 })

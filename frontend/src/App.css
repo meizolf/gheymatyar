@@ -393,6 +393,22 @@
   opacity: 0.65;
 }
 
+.row-blocked {
+  background: #fef2f2;
+}
+
+.provenance {
+  margin-top: 0.2rem;
+  color: #57534e;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.blocked-note {
+  color: #991b1b;
+  font-size: 0.8rem;
+}
+
 .suggestions {
   margin-bottom: 1rem;
 }

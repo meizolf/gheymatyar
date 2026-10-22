@@ -15,6 +15,9 @@ from gheymatyar.services.session_store import SessionStore
 
 DEFAULT_SETTING_KEYS = {
     "suspicious_percent_threshold": "30",
+    # Blank means the Pioneers sale column's currency/basis is not confirmed.
+    "pioneers_sale_currency": "",
+    "pioneers_sale_basis": "",
 }
 
 

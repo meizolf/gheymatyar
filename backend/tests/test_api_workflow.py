@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from openpyxl import load_workbook
-
 
 def test_list_suppliers(client) -> None:
     response = client.get("/api/suppliers")
@@ -89,96 +87,24 @@ def test_end_to_end_azin_workflow(
         "ambiguous_count"
     ] == len(payload["candidates"])
 
-    # 5) manually confirm one unmatched/ambiguous if needed, else use a matched one
-    candidates = payload["candidates"]
-    exportable = [c for c in candidates if c["exportable"]]
-    if not exportable:
-        # Confirm a suggestion manually
-        needy = next(
-            c
-            for c in candidates
-            if c["status"] in {"UNMATCHED", "AMBIGUOUS"} and c["suggestions"]
-        )
-        suggestion = needy["suggestions"][0]
-        confirm = client.post(
-            f"/api/sessions/{session_id}/candidates/{needy['candidate_id']}/confirm-mapping",
-            json={"pioneers_row_number": suggestion["row_number"], "save": True},
-        )
-        assert confirm.status_code == 200, confirm.text
-        # Approve if warnings present
-        confirmed = confirm.json()
-        if confirmed["warnings"]:
-            review = client.post(
-                f"/api/sessions/{session_id}/candidates/{needy['candidate_id']}/review",
-                json={"decision": "APPROVE"},
-            )
-            assert review.status_code == 200
-            assert review.json()["exportable"] is True
-    else:
-        # Approve warned matched rows so at least one exports
-        target = exportable[0]
-        if not target["exportable"]:
-            pass
-        # Prefer first matched; approve warnings
-        matched = next(c for c in candidates if c["status"] == "MATCHED")
-        if matched["warnings"] or not matched["exportable"]:
-            review = client.post(
-                f"/api/sessions/{session_id}/candidates/{matched['candidate_id']}/review",
-                json={"decision": "APPROVE"},
-            )
-            assert review.status_code == 200
-
-    # Ensure at least one exportable after approvals
-    preview = client.get(f"/api/sessions/{session_id}/preview")
-    assert preview.status_code == 200
-    preview_candidates = preview.json()["candidates"]
-    if not any(c["exportable"] for c in preview_candidates):
-        matched = next(c for c in preview_candidates if c["status"] == "MATCHED")
-        client.post(
-            f"/api/sessions/{session_id}/candidates/{matched['candidate_id']}/review",
-            json={"decision": "APPROVE"},
-        )
-
-    # Exclude everything except one approved row to keep export small/deterministic
-    preview = client.get(f"/api/sessions/{session_id}/preview").json()["candidates"]
-    keep = next(c for c in preview if c["status"] == "MATCHED")
-    client.post(
-        f"/api/sessions/{session_id}/candidates/{keep['candidate_id']}/review",
+    # The Azin list states a Rial amount, but not whether that amount is per metre
+    # or per piece, and this workbook has no unit column. Export stays blocked.
+    matched = [row for row in payload["candidates"] if row["status"] == "MATCHED"]
+    assert matched
+    assert all(row["exportable"] is False for row in matched)
+    assert any(
+        "price basis:" in blocker
+        for row in matched
+        for blocker in row["pricing_blockers"]
+    )
+    review = client.post(
+        f"/api/sessions/{session_id}/candidates/{matched[0]['candidate_id']}/review",
         json={"decision": "APPROVE"},
     )
-    for c in preview:
-        if c["candidate_id"] == keep["candidate_id"]:
-            continue
-        client.post(
-            f"/api/sessions/{session_id}/candidates/{c['candidate_id']}/review",
-            json={"decision": "EXCLUDE"},
-        )
-
-    # 6) export
+    assert review.status_code == 400
     export_resp = client.post(f"/api/sessions/{session_id}/export")
-    assert export_resp.status_code == 200, export_resp.text
-    assert export_resp.json()["updated_count"] >= 1
-
-    # 7) download
-    download = client.get(f"/api/sessions/{session_id}/download")
-    assert download.status_code == 200
-    out_path = tmp_path / "out.xlsx"
-    out_path.write_bytes(download.content)
-
-    # Source immutability: original fixture untouched (size check)
+    assert export_resp.status_code == 400
     assert pioneers_azin_excel.stat().st_size > 0
-
-    # Output has updated sale price for the kept row
-    wb = load_workbook(out_path, read_only=True, data_only=True)
-    ws = wb.active
-    headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
-    sale_idx = headers.index("نرخ فروش اصلی")
-    row_number = keep["row_number"]
-    row_vals = [c.value for c in next(ws.iter_rows(min_row=row_number, max_row=row_number))]
-    assert str(row_vals[sale_idx]).replace(",", "") == str(keep["new_price"]).replace(
-        ",", ""
-    )
-    wb.close()
 
 
 def test_search_pioneers_products(client, pioneers_azin_excel: Path) -> None:
