@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import { translateApiDetail } from '../utils/apiMessages'
 import { isApiError } from '../api/errors'
 import { useWorkflow } from '../workflow/WorkflowContext'
+import { BrowserCompatBanner } from './BrowserCompatBanner'
 import { Button } from './ui/Button'
 
 export function Layout() {
@@ -26,7 +27,11 @@ export function Layout() {
     setExiting(true)
     setExitError(null)
     try {
-      await api.shutdown()
+      const health = await api.health()
+      if (health.app !== 'gheymatyar' || !health.control_token) {
+        throw new Error('پاسخ سلامت سرور نامعتبر است.')
+      }
+      await api.shutdown(health.control_token)
       setExitError(
         'سرور در حال توقف است. این پنجره مرورگر را می‌توانید ببندید.',
       )
@@ -35,7 +40,7 @@ export function Layout() {
         translateApiDetail(
           isApiError(err)
             ? err.detail
-            : 'خروج فقط وقتی در دسترس است که برنامه با python -m gheymatyar اجرا شده باشد.',
+            : 'خروج فقط وقتی در دسترس است که برنامه از میانبر نصب‌شده (GheymatYar) اجرا شده باشد.',
         ),
       )
     } finally {
@@ -68,6 +73,7 @@ export function Layout() {
         </nav>
       </header>
       <main className="app-main">
+        <BrowserCompatBanner />
         {exitError ? (
           <p className="exit-banner" role="status">
             {exitError}

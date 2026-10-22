@@ -1,0 +1,181 @@
+name: Windows Offline Installer
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "installer/**"
+      - "scripts/windows/**"
+      - "fixtures/**"
+      - ".github/workflows/windows-installer.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "installer/**"
+      - "scripts/windows/**"
+      - "fixtures/**"
+      - ".github/workflows/windows-installer.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: windows-installer-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12.10"
+  NODE_VERSION: "22"
+  INNO_SETUP_VERSION: "6.7.3"
+  INNO_SETUP_SHA256: "9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_NO_PYTHON_VERSION_WARNING: "1"
+
+jobs:
+  build-installer:
+    name: Build GheymatYarSetup.exe
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }} x64
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: x64
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Inno Setup ${{ env.INNO_SETUP_VERSION }}
+        shell: pwsh
+        run: |
+          $url = "https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-${{ env.INNO_SETUP_VERSION }}.exe"
+          $installer = Join-Path $env:RUNNER_TEMP "innosetup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          $hash = (Get-FileHash -Algorithm SHA256 $installer).Hash.ToLowerInvariant()
+          if ($hash -ne "${{ env.INNO_SETUP_SHA256 }}") {
+            throw "Inno Setup hash mismatch: got $hash"
+          }
+          Start-Process -FilePath $installer -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-" -Wait
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe missing after install" }
+          # Inno Setup 6.7.3 rejects --version (added in Inno 7). Confirm via
+          # uninstall registry DisplayVersion; SHA-256 of the installer is the pin.
+          $displayVersion = (
+            Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1" -ErrorAction SilentlyContinue
+          ).DisplayVersion
+          if (-not $displayVersion) {
+            $displayVersion = (
+              Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1" -ErrorAction SilentlyContinue
+            ).DisplayVersion
+          }
+          if ($displayVersion -ne "${{ env.INNO_SETUP_VERSION }}") {
+            throw "Inno Setup DisplayVersion mismatch: got '$displayVersion', expected ${{ env.INNO_SETUP_VERSION }}"
+          }
+          # Do NOT invoke ISCC -? / --version / /?: Inno Setup 6.7.3 rejects these
+          # and exits 1, which GitHub Actions treats as a failed step even when
+          # stdout is inspected. Presence + SHA-256 + DisplayVersion is the pin.
+          Write-Host "ISCC ready: $iscc (DisplayVersion=$displayVersion)"
+          echo "ISCC=$iscc" >> $env:GITHUB_ENV
+
+      - name: Frontend typecheck + unit tests
+        working-directory: frontend
+        shell: pwsh
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+          npm run typecheck
+          if ($LASTEXITCODE -ne 0) { throw "typecheck failed" }
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw "frontend tests failed" }
+
+      - name: Build frontend and embed static assets
+        shell: pwsh
+        run: .\scripts\windows\prepare_static.ps1
+
+      - name: Install pinned Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install -U "pip==25.2" "setuptools==84.2.1" "wheel==0.45.1"
+          if ($LASTEXITCODE -ne 0) { throw "pip bootstrap failed" }
+          python -m pip install -r backend\requirements-windows.txt
+          if ($LASTEXITCODE -ne 0) { throw "requirements install failed" }
+          python -m pip install -e backend
+          if ($LASTEXITCODE -ne 0) { throw "editable install failed" }
+
+      - name: Backend tests (incl. packaging path checks)
+        working-directory: backend
+        shell: pwsh
+        run: |
+          python -m pytest -q
+          if ($LASTEXITCODE -ne 0) { throw "backend tests failed" }
+
+      - name: PyInstaller onedir bundle
+        shell: pwsh
+        run: |
+          if (Test-Path build) { Remove-Item -Recurse -Force build }
+          if (Test-Path dist\GheymatYar) { Remove-Item -Recurse -Force dist\GheymatYar }
+          python -m PyInstaller --noconfirm --clean installer\gheymatyar.spec
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
+          if (-not (Test-Path dist\GheymatYar\GheymatYar.exe)) {
+            throw "PyInstaller did not produce dist\GheymatYar\GheymatYar.exe"
+          }
+
+      - name: Verify bundled DLLs and static assets
+        shell: pwsh
+        run: .\scripts\windows\verify_bundle.ps1 -BundleDir dist\GheymatYar
+
+      - name: Smoke-test packaged EXE (Excel + PDF workflow)
+        shell: pwsh
+        run: .\scripts\windows\smoke_packaged.ps1 -BundleDir dist\GheymatYar
+
+      - name: Compile Inno Setup installer
+        shell: pwsh
+        run: |
+          & $env:ISCC installer\gheymatyar.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC compile failed" }
+          $setup = "dist\installer\GheymatYarSetup.exe"
+          if (-not (Test-Path $setup)) {
+            throw "GheymatYarSetup.exe was not produced"
+          }
+          $item = Get-Item $setup
+          $sha = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant()
+          $sizeMb = [math]::Round($item.Length / 1MB, 2)
+          Write-Host "Installer: $($item.FullName)"
+          Write-Host "Size bytes: $($item.Length) ($sizeMb MB)"
+          Write-Host "SHA256: $sha"
+          @"
+          file=$($item.Name)
+          bytes=$($item.Length)
+          sha256=$sha
+          "@ | Set-Content -Encoding ascii "dist\installer\GheymatYarSetup.exe.sha256.txt"
+          "GheymatYarSetup.exe  $sha" | Set-Content -Encoding ascii "dist\installer\SHA256SUMS"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GheymatYarSetup
+          path: |
+            dist/installer/GheymatYarSetup.exe
+            dist/installer/GheymatYarSetup.exe.sha256.txt
+            dist/installer/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload onedir bundle (debug)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GheymatYar-onedir-debug
+          path: dist/GheymatYar/
+          if-no-files-found: ignore
+          retention-days: 7

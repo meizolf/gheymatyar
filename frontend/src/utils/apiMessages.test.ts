@@ -56,6 +56,17 @@ describe('translateApiDetail', () => {
     ).toMatch(/خالی/)
   })
 
+  it('translates packaged-app shutdown guidance', () => {
+    expect(
+      translateApiDetail(
+        'shutdown is only available when launched via GheymatYar.exe or python -m gheymatyar',
+      ),
+    ).toMatch(/میانبر نصب‌شده/)
+    expect(
+      translateApiDetail('missing or invalid local control token'),
+    ).toMatch(/توکن کنترل/)
+  })
+
   it('passes through unknown details', () => {
     expect(translateApiDetail('weird custom error')).toBe('weird custom error')
   })

@@ -5,6 +5,11 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  // Keep in sync with docs/windows_packaging.md browser minimums.
+  // Vite 8 baseline-widely-available == chrome111 / edge111 / firefox114.
+  build: {
+    target: ['chrome111', 'edge111', 'firefox114'],
+  },
   server: {
     port: 4567,
     strictPort: true,

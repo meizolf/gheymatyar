@@ -53,6 +53,23 @@ describe('api client', () => {
     )
   })
 
+  it('sends local control token on shutdown', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: 'shutting_down' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    await api.shutdown('test-token-value')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/shutdown',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'X-GheymatYar-Token': 'test-token-value' },
+      }),
+    )
+  })
+
   it('prevents duplicate export by returning a promise the UI awaits', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

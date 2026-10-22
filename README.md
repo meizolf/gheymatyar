@@ -21,7 +21,7 @@ installer/   PyInstaller + Inno Setup (build on Windows)
 
 ## Prerequisites (macOS development)
 
-- **Python 3.11+** (Homebrew `python@3.12` recommended)
+- **Python 3.11 or 3.12** (Homebrew `python@3.12` recommended; Windows packaging pins 3.12)
 - Node.js `^20.19.0 || >=22.12.0`
 
 ## Backend
@@ -37,7 +37,8 @@ uvicorn gheymatyar.main:app --reload --host 127.0.0.1 --port 8765
 
 Health: [http://127.0.0.1:8765/api/health](http://127.0.0.1:8765/api/health)
 
-Interactive docs: [http://127.0.0.1:8765/docs](http://127.0.0.1:8765/docs)
+Interactive OpenAPI docs are **disabled by default** (offline / no CDN). Enable with
+`GHEYMATYAR_ENABLE_DOCS=1` if needed during development.
 
 SQLite defaults to `~/.gheymatyar/gheymatyar.db` (override with `GHEYMATYAR_DATABASE_URL`
 or `GHEYMATYAR_DATA_DIR`).
@@ -77,8 +78,17 @@ python -m gheymatyar
 Opens [http://127.0.0.1:8765/](http://127.0.0.1:8765/). Override static root with
 `GHEYMATYAR_STATIC_DIR`. Bind host remains `127.0.0.1`.
 
-Windows packaging: see [docs/windows_packaging.md](docs/windows_packaging.md).
-**Windows EXE must be built on Windows** — not on macOS.
+### Offline Windows installer
+
+See [docs/windows_packaging.md](docs/windows_packaging.md) for the full guide.
+
+- **Artifact:** one `GheymatYarSetup.exe` (no Python/Node on the target PC)
+- **Build:** Windows only — local `scripts/windows/build_installer.ps1` or GitHub Actions
+  workflow **Windows Offline Installer** (`.github/workflows/windows-installer.yml`)
+- **Download from CI:** Actions → workflow run → Artifacts → **`GheymatYarSetup`**
+- **Data:** mappings survive upgrades in `%USERPROFILE%\.gheymatyar\`
+
+macOS cannot produce the Windows EXE; use the Actions artifact or a Windows build host.
 
 ### Supported supplier
 
@@ -127,5 +137,5 @@ See [docs/adding_a_supplier.md](docs/adding_a_supplier.md).
 |---|---|
 | Full wizard against fixtures via API | Covered by backend + frontend tests |
 | Same-origin SPA after `npm run build` | Implemented |
-| Windows installer binary | Scripts ready; build on Windows |
+| Windows installer binary | Spec + Inno + Actions workflow; download `GheymatYarSetup` artifact |
 | Import into Pioneers desktop app | **Manual** — tool only downloads Excel |

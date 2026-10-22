@@ -1,0 +1,55 @@
+# Pinned dependencies for offline Windows packaging (Python 3.12 x64).
+# Generated for reproducible CI/local builds. Do not edit casually.
+# Install: python -m pip install -r backend/requirements-windows.txt
+#
+# Notes:
+# - uvloop is intentionally omitted (unsupported on Windows).
+# - Native wheels (pypdfium2, pymupdf, cryptography, pillow, cffi) resolve
+#   to Windows x64 artifacts when installed on a Windows host.
+
+altgraph==0.17.5
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+certifi==2026.7.22
+cffi==2.1.1
+charset-normalizer==3.5.2
+click==8.5.0
+cryptography==50.0.2
+et_xmlfile==2.0.0
+fastapi==0.142.2
+h11==0.16.0
+httpcore==1.0.9
+httptools==0.8.0
+httpx==0.28.1
+idna==3.20
+iniconfig==2.3.0
+openpyxl==3.1.5
+opentelemetry-api==1.45.0
+packaging==26.3
+pdfminer.six==20260107
+pdfplumber==0.11.10
+pefile==2024.8.26
+pillow==13.0.0
+pluggy==1.6.0
+pycparser==3.11
+pydantic==2.13.5
+pydantic_core==2.46.5
+Pygments==2.21.0
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.8
+pymupdf==1.28.2
+pypdfium2==5.14.0
+pytest==9.1.1
+python-dotenv==1.2.4
+python-multipart==0.0.32
+pywin32-ctypes==0.2.3
+PyYAML==6.0.3
+setuptools==84.2.1
+SQLAlchemy==2.1.3
+starlette==1.7.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+uvicorn[standard]==0.54.0
+watchfiles==1.3.0
+websockets==17.2

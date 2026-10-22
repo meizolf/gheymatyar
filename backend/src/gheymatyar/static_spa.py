@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -11,23 +12,34 @@ from fastapi.staticfiles import StaticFiles
 
 
 def resolve_static_dir() -> Path | None:
-    """Locate frontend dist directory (env override, then repo-relative)."""
+    """Locate frontend dist directory (env override, then bundled / repo paths)."""
     override = os.environ.get("GHEYMATYAR_STATIC_DIR")
     if override:
         path = Path(override).expanduser().resolve()
         return path if path.is_dir() else None
 
-    # backend/src/gheymatyar/static_spa.py → repo root
-    repo_dist = (
-        Path(__file__).resolve().parents[3] / "frontend" / "dist"
-    )
-    if repo_dist.is_dir():
-        return repo_dist
+    candidates: list[Path] = []
 
-    # PyInstaller / installed layout: sibling static/ next to package
-    bundled = Path(__file__).resolve().parent / "static"
-    if bundled.is_dir():
-        return bundled
+    # PyInstaller onedir / onefile extraction root
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "gheymatyar" / "static")
+
+    # Frozen EXE next to collected package data (onedir layout)
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        candidates.append(exe_dir / "gheymatyar" / "static")
+        candidates.append(exe_dir / "_internal" / "gheymatyar" / "static")
+
+    # Installed / source layout: sibling static/ next to this module
+    candidates.append(Path(__file__).resolve().parent / "static")
+
+    # Development: repo frontend/dist (backend/src/gheymatyar → repo root)
+    candidates.append(Path(__file__).resolve().parents[3] / "frontend" / "dist")
+
+    for candidate in candidates:
+        if candidate.is_dir() and (candidate / "index.html").is_file():
+            return candidate
 
     return None
 

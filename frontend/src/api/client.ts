@@ -46,11 +46,21 @@ async function requestJson<T>(
   return (await response.json()) as T
 }
 
-export const api = {
-  health: () => requestJson<{ status: string }>('/health'),
+export type HealthResponse = {
+  status: string
+  app: string
+  version: string
+  control_token: string
+}
 
-  shutdown: () =>
-    requestJson<{ status: string }>('/shutdown', { method: 'POST' }),
+export const api = {
+  health: () => requestJson<HealthResponse>('/health'),
+
+  shutdown: (controlToken: string) =>
+    requestJson<{ status: string }>('/shutdown', {
+      method: 'POST',
+      headers: { 'X-GheymatYar-Token': controlToken },
+    }),
 
 
   listSuppliers: () => requestJson<SupplierInfo[]>('/suppliers'),

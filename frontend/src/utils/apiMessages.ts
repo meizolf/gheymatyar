@@ -183,6 +183,26 @@ const PATTERNS: Array<{ re: RegExp; fa: string | ((m: RegExpMatchArray) => strin
     re: /candidate has no new price/i,
     fa: 'این مورد قیمت جدید ندارد.',
   },
+  {
+    re: /shutdown is only available when launched via/i,
+    fa: 'خروج فقط وقتی در دسترس است که برنامه از میانبر نصب‌شده (GheymatYar) اجرا شده باشد.',
+  },
+  {
+    re: /shutdown only allowed from localhost|API only allowed from localhost/i,
+    fa: 'دسترسی API فقط از همین رایانه مجاز است.',
+  },
+  {
+    re: /missing or invalid local control token/i,
+    fa: 'توکن کنترل محلی نامعتبر است. صفحه را تازه کنید و دوباره خارج شوید.',
+  },
+  {
+    re: /cross-origin (?:control|API) requests are not allowed/i,
+    fa: 'درخواست از مبدأ غیرمجاز مسدود شد.',
+  },
+  {
+    re: /invalid Host header for local (?:control|API) request/i,
+    fa: 'هدر Host نامعتبر است؛ دسترسی فقط از سرور محلی مجاز است.',
+  },
 ]
 
 export function translateApiDetail(detail: string | null | undefined): string {
