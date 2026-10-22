@@ -178,6 +178,7 @@ algorithm changes were made for this packaging pass.
 | Browser incompatible banner | Install Edge/Chrome/Firefox at the versions above |
 | PDF parse fails only in EXE | `verify_bundle.ps1` — pdfium + VC++ DLLs must be in the bundle |
 | `verify_bundle` flags `bcryptprimitives.dll` | That DLL is a Windows CNG system dependency (not redistributable). It belongs on the OS allowlist, not in the onedir tree. |
+| `verify_bundle` flags `propsys.dll` (from `_wmi.pyd`) | Windows Property System DLL in System32. Allowlist as an OS dependency; do not bundle it. |
 | Shutdown 403 | UI must send `X-GheymatYar-Token` from `/api/health` |
 
 ## Verified vs unverified

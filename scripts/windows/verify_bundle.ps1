@@ -217,7 +217,10 @@ $systemDllAllow = [System.Collections.Generic.HashSet[string]]::new([StringCompa
     "imagehlp.dll", "psapi.dll", "wintrust.dll",
     # CNG primitive provider (ProcessPrng etc.) — shipped with Windows, imported by
     # cryptography / pydantic-core wheels; PyInstaller correctly leaves it out.
-    "bcryptprimitives.dll"
+    "bcryptprimitives.dll",
+    # Windows Property System — System32 DLL imported by CPython _wmi.pyd;
+    # PyInstaller excludes it as a Windows-dir dependency (not redistributable).
+    "propsys.dll"
 ) | ForEach-Object { [void]$systemDllAllow.Add($_) }
 
 function Test-IsOsSystemDll([string]$name) {
