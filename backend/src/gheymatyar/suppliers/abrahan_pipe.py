@@ -19,6 +19,7 @@ import pymupdf
 from gheymatyar.domain.supplier_item import SupplierPriceItem
 from gheymatyar.services.name_normalization import normalize_digits, normalize_product_name
 from gheymatyar.suppliers.base import BaseSupplierProcessor, SupplierParseResult
+from gheymatyar.suppliers.detection import DetectionRules
 from gheymatyar.suppliers.errors import SupplierPdfError
 from gheymatyar.suppliers.textutil import contains_arabic, parse_grouped_amount, polish_persian
 
@@ -92,6 +93,14 @@ class AbrahanPipeProcessor(BaseSupplierProcessor):
 
     supplier_key = SUPPLIER_KEY
     display_name = SUPPLIER_DISPLAY_NAME
+
+    def detection_rules(self) -> DetectionRules:
+        return DetectionRules(
+            strong_markers=("لوله آبراهان", "آبراهان", "ابراهان", "ABRAHAN"),
+            weak_markers=(),
+            supporting_markers=("لیست قیمت نقدی",),
+            websites=(),
+        )
 
     def parse_pdf(self, path: str | Path) -> SupplierParseResult:
         source = Path(path)

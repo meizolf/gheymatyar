@@ -25,6 +25,7 @@ from gheymatyar.domain.supplier_item import SupplierPriceItem
 from gheymatyar.services.name_normalization import normalize_product_name
 from gheymatyar.suppliers.azin_pipe import fix_reversed_persian
 from gheymatyar.suppliers.base import BaseSupplierProcessor, SupplierParseResult
+from gheymatyar.suppliers.detection import DetectionRules
 from gheymatyar.suppliers.errors import SupplierPdfError
 from gheymatyar.suppliers.textutil import parse_grouped_amount, polish_persian
 
@@ -115,6 +116,14 @@ class TopIndustrialProcessor(BaseSupplierProcessor):
 
     supplier_key = SUPPLIER_KEY
     display_name = SUPPLIER_DISPLAY_NAME
+
+    def detection_rules(self) -> DetectionRules:
+        return DetectionRules(
+            strong_markers=("گروه صنعتی تاپ", "تاپ"),
+            weak_markers=("فلاش تانک", "فالش تانک"),
+            supporting_markers=("قیمت (تومان)", "تومان"),
+            websites=(),
+        )
 
     def parse_pdf(self, path: str | Path) -> SupplierParseResult:
         source = Path(path)

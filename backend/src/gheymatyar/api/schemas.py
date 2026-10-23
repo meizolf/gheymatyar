@@ -28,10 +28,22 @@ class InvalidRowResponse(BaseModel):
     name: str | None = None
 
 
+class DetectionInfoResponse(BaseModel):
+    detected_supplier_id: str | None = None
+    detected_supplier_name: str | None = None
+    confidence: str = "UNKNOWN"
+    evidence: list[str] = Field(default_factory=list)
+    requires_confirmation: bool = True
+    text_extracted: bool = False
+    ocr_used: bool = False
+
+
 class SessionSummaryResponse(BaseModel):
     session_id: str
     supplier_key: str | None = None
     supplier_display_name: str | None = None
+    supplier_confirmed: bool = False
+    detection: DetectionInfoResponse | None = None
     pioneers_filename: str | None = None
     pdf_filename: str | None = None
     product_count: int = 0
@@ -54,6 +66,22 @@ class UploadExcelResponse(SessionSummaryResponse):
 
 class UploadPdfResponse(SessionSummaryResponse):
     pass
+
+
+class DetectSupplierResponse(BaseModel):
+    """PDF stored; supplier suggested; prices not parsed until confirmation."""
+
+    session_id: str
+    pdf_filename: str | None = None
+    supplier_confirmed: bool = False
+    detection: DetectionInfoResponse
+    summary: SessionSummaryResponse
+
+
+class ConfirmSupplierRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    supplier_key: str = Field(..., min_length=1)
 
 
 class MatchRequest(BaseModel):

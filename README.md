@@ -124,7 +124,9 @@ See [docs/adding_a_supplier.md](docs/adding_a_supplier.md).
 | `POST` | `/api/sessions` | Create processing session |
 | `GET` | `/api/sessions/{id}` | Session summary |
 | `POST` | `/api/sessions/{id}/pioneers-excel` | Upload/parse Pioneers Excel |
-| `POST` | `/api/sessions/{id}/supplier-pdf` | Upload/parse supplier PDF |
+| `POST` | `/api/sessions/{id}/supplier-pdf/detect` | Upload PDF and detect supplier (no price parse) |
+| `POST` | `/api/sessions/{id}/supplier-pdf/confirm` | Confirm supplier and parse prices |
+| `POST` | `/api/sessions/{id}/supplier-pdf` | Upload/parse with explicit `supplier_key` (API confirmation) |
 | `POST` | `/api/sessions/{id}/match` | Run name matching + price preview |
 | `GET` | `/api/sessions/{id}/candidates` | List candidates (`?status=` optional) |
 | `GET` | `/api/sessions/{id}/preview` | Matched price-change preview |
@@ -140,6 +142,7 @@ See [docs/adding_a_supplier.md](docs/adding_a_supplier.md).
 - Only `نرخ فروش اصلی` is modified
 - Fuzzy name matches are never auto-confirmed
 - Suspicious price changes require explicit `APPROVE`
+- Supplier auto-detection is a suggestion only; prices are never parsed or matched until the user confirms the company
 - Export is all-or-nothing validation before write
 - Production bind host: `127.0.0.1`
 

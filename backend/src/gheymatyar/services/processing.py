@@ -112,6 +112,24 @@ def _invalidate_export(session: ProcessingSession) -> None:
     session.output_path = None
 
 
+def _clear_match_state(session: ProcessingSession) -> None:
+    session.candidates = []
+    session.matched_count = 0
+    session.unmatched_count = 0
+    session.ambiguous_count = 0
+
+
+def _revoke_supplier_confirmation(session: ProcessingSession) -> None:
+    """Drop parsed prices, matches, and exports after a failed/retracted confirm."""
+    session.supplier_confirmed = False
+    session.supplier_items = []
+    session.parse_warnings = []
+    session.metadata.pop("supplier_parse", None)
+    session.metadata.pop("confirmed_supplier_key", None)
+    _clear_match_state(session)
+    _invalidate_export(session)
+
+
 class ProcessingService:
     """Application service used by API controllers."""
 
@@ -199,6 +217,91 @@ class ProcessingService:
             _invalidate_export(session)
             return session
 
+    def detect_supplier_pdf(
+        self,
+        session_id: str,
+        *,
+        filename: str,
+        stream: BinaryIO,
+    ) -> tuple[ProcessingSession, dict[str, object]]:
+        """Store a PDF and detect the supplier without parsing prices.
+
+        Price extraction must wait for :meth:`confirm_supplier_pdf`.
+        A detection failure still keeps a valid upload so the user can
+        manually select and confirm a supplier.
+        """
+        from gheymatyar.suppliers.detection import Confidence, DetectionResult
+
+        with self._store.session_lock(session_id):
+            session = self._store.require(session_id)
+            assert session.work_dir is not None
+            safe_name = _safe_filename(filename, default="supplier.pdf")
+
+            staging = session.work_dir / f"supplier.staging.{uuid4().hex}.pdf"
+            staging.write_bytes(stream.read())
+            try:
+                detection = self._registry.detect(staging)
+            except Exception as exc:  # noqa: BLE001 — keep upload for manual recovery
+                detection = DetectionResult(
+                    detected_supplier_id=None,
+                    detected_supplier_name=None,
+                    confidence=Confidence.UNKNOWN,
+                    evidence=["detection_error", str(exc)[:200]],
+                    requires_confirmation=True,
+                    text_extracted=False,
+                    ocr_used=False,
+                )
+
+            final = session.work_dir / "supplier.pdf"
+            staging.replace(final)
+
+            detection_payload = detection.to_api_dict()
+            session.pdf_filename = safe_name
+            session.pdf_path = final
+            _revoke_supplier_confirmation(session)
+            session.supplier_key = detection.detected_supplier_id
+            session.supplier_display_name = detection.detected_supplier_name
+            session.metadata["detection"] = detection_payload
+            return session, detection_payload
+
+    def confirm_supplier_pdf(
+        self,
+        session_id: str,
+        *,
+        supplier_key: str,
+    ) -> ProcessingSession:
+        """Parse the already-uploaded PDF with the user-confirmed supplier."""
+        with self._store.session_lock(session_id):
+            session = self._store.require(session_id)
+            if session.pdf_path is None or not session.pdf_path.is_file():
+                raise ValueError(
+                    "Supplier PDF has not been uploaded; detect a PDF first"
+                )
+            processor = self._registry.get(supplier_key)
+            try:
+                self._registry.validate_pdf_for_supplier(
+                    session.pdf_path, supplier_key
+                )
+                parse_result = processor.parse_pdf(session.pdf_path)
+            except Exception:
+                # Keep the uploaded PDF; clear any prior confirmed results.
+                _revoke_supplier_confirmation(session)
+                # Preserve the user's attempted selection for the confirmation UI.
+                session.supplier_key = processor.supplier_key
+                session.supplier_display_name = processor.display_name
+                raise
+
+            session.supplier_key = processor.supplier_key
+            session.supplier_display_name = processor.display_name
+            session.supplier_confirmed = True
+            session.supplier_items = list(parse_result.items)
+            session.parse_warnings = list(parse_result.warnings)
+            session.metadata["supplier_parse"] = parse_result.source_metadata
+            session.metadata["confirmed_supplier_key"] = processor.supplier_key
+            _clear_match_state(session)
+            _invalidate_export(session)
+            return session
+
     def upload_supplier_pdf(
         self,
         session_id: str,
@@ -207,6 +310,7 @@ class ProcessingService:
         filename: str,
         stream: BinaryIO,
     ) -> ProcessingSession:
+        """Upload a PDF with an explicit supplier key (treated as confirmation)."""
         with self._store.session_lock(session_id):
             session = self._store.require(session_id)
             assert session.work_dir is not None
@@ -216,6 +320,7 @@ class ProcessingService:
             staging = session.work_dir / f"supplier.staging.{uuid4().hex}.pdf"
             staging.write_bytes(stream.read())
             try:
+                self._registry.validate_pdf_for_supplier(staging, supplier_key)
                 parse_result = processor.parse_pdf(staging)
             except Exception:
                 staging.unlink(missing_ok=True)
@@ -226,15 +331,15 @@ class ProcessingService:
 
             session.supplier_key = processor.supplier_key
             session.supplier_display_name = processor.display_name
+            session.supplier_confirmed = True
             session.pdf_filename = safe_name
             session.pdf_path = final
             session.supplier_items = list(parse_result.items)
             session.parse_warnings = list(parse_result.warnings)
             session.metadata["supplier_parse"] = parse_result.source_metadata
-            session.candidates = []
-            session.matched_count = 0
-            session.unmatched_count = 0
-            session.ambiguous_count = 0
+            session.metadata["confirmed_supplier_key"] = processor.supplier_key
+            session.metadata.pop("detection", None)
+            _clear_match_state(session)
             _invalidate_export(session)
             return session
 
@@ -262,6 +367,10 @@ class ProcessingService:
         session = self._store.require(session_id)
         if not session.products:
             raise ValueError("Pioneers Excel has not been uploaded")
+        if not session.supplier_confirmed:
+            raise ValueError(
+                "Supplier has not been confirmed; confirm the detected supplier first"
+            )
         if not session.supplier_items or not session.supplier_key:
             raise ValueError("Supplier PDF has not been uploaded")
 
@@ -493,6 +602,10 @@ class ProcessingService:
     ) -> ExcelUpdateResult:
         with self._store.session_lock(session_id):
             session = self._store.require(session_id)
+            if not session.supplier_confirmed:
+                raise ValueError(
+                    "Supplier has not been confirmed; confirm the detected supplier first"
+                )
             if session.pioneers_path is None or not session.pioneers_path.is_file():
                 raise ValueError("Pioneers Excel has not been uploaded")
             assert session.work_dir is not None
@@ -526,10 +639,13 @@ class ProcessingService:
     def preview_summary(self, session: ProcessingSession) -> dict[str, object]:
         exportable = sum(1 for c in session.candidates if is_exportable(c))
         warned = sum(1 for c in session.candidates if c.warnings)
+        detection = session.metadata.get("detection")
         return {
             "session_id": session.session_id,
             "supplier_key": session.supplier_key,
             "supplier_display_name": session.supplier_display_name,
+            "supplier_confirmed": session.supplier_confirmed,
+            "detection": detection if isinstance(detection, dict) else None,
             "pioneers_filename": session.pioneers_filename,
             "pdf_filename": session.pdf_filename,
             "product_count": len(session.products),

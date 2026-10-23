@@ -25,6 +25,8 @@ def test_session_lock_serializes_exclude_before_export_snapshot(
         service.upload_pioneers_excel(session.session_id, "p.xlsx", handle)
 
     session = service.get_session(session.session_id)
+    session.supplier_key = "azin_pipe"
+    session.supplier_confirmed = True
     session.metadata["pioneers_sale_currency"] = "rial"
     session.metadata["pioneers_sale_basis"] = "piece"
     # Seed two matched exportable candidates pointing at real product rows.

@@ -23,6 +23,7 @@ from gheymatyar.domain.supplier_item import SupplierPriceItem
 from gheymatyar.services.name_normalization import normalize_product_name
 from gheymatyar.suppliers.azin_pipe import fix_reversed_persian
 from gheymatyar.suppliers.base import BaseSupplierProcessor, SupplierParseResult
+from gheymatyar.suppliers.detection import DetectionRules
 from gheymatyar.suppliers.errors import SupplierPdfError
 from gheymatyar.suppliers.textutil import contains_arabic, parse_grouped_amount, polish_persian
 
@@ -104,6 +105,14 @@ class NewPipeProcessor(BaseSupplierProcessor):
 
     supplier_key = SUPPLIER_KEY
     display_name = SUPPLIER_DISPLAY_NAME
+
+    def detection_rules(self) -> DetectionRules:
+        # Avoid shared Gitikala footer markers — Dina lists use the same portal.
+        return DetectionRules(
+            strong_markers=("نیوپایپ", "پیاپوین"),
+            weak_markers=("لوله پنج لایه", "اتصالات پنج لایه", "گیتی کالا"),
+            websites=(),
+        )
 
     def parse_pdf(self, path: str | Path) -> SupplierParseResult:
         source = Path(path)

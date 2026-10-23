@@ -227,6 +227,7 @@ def test_legacy_code_mapping_schema_migrates_safely(tmp_path: Path) -> None:
     session = svc.get_session(session.session_id)
     session.supplier_key = "azin_pipe"
     session.supplier_display_name = "آذین لوله"
+    session.supplier_confirmed = True
     session.supplier_items = [
         SupplierPriceItem(
             supplier_id="azin_pipe",
@@ -541,6 +542,7 @@ def test_name_only_product_matches_and_exports(tmp_path: Path, db: Database) -> 
         svc.upload_pioneers_excel(session.session_id, "n.xlsx", handle)
     session = svc.get_session(session.session_id)
     session.supplier_key = "azin_pipe"
+    session.supplier_confirmed = True
     session.supplier_items = [
         SupplierPriceItem(
             supplier_id="azin_pipe",

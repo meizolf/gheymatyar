@@ -13,6 +13,9 @@ from gheymatyar.api.schemas import (
     CandidateResponse,
     CandidatesResponse,
     ConfirmMappingRequest,
+    ConfirmSupplierRequest,
+    DetectSupplierResponse,
+    DetectionInfoResponse,
     ExportResponse,
     MatchRequest,
     ProductSearchResponse,
@@ -80,6 +83,66 @@ async def upload_pioneers_excel(
 
 
 @router.post(
+    "/sessions/{session_id}/supplier-pdf/detect",
+    response_model=DetectSupplierResponse,
+)
+async def detect_supplier_pdf(
+    session_id: str,
+    file: UploadFile = File(...),
+    service: ProcessingService = Depends(get_processing_service),
+) -> DetectSupplierResponse:
+    """Upload a PDF, detect the supplier, and wait for user confirmation.
+
+    Prices are not extracted until ``/supplier-pdf/confirm``.
+    """
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="expected a .pdf upload")
+    try:
+        session, detection = service.detect_supplier_pdf(
+            session_id,
+            filename=file.filename,
+            stream=file.file,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="session not found") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    summary = _summary(service, session.session_id)
+    return DetectSupplierResponse(
+        session_id=session.session_id,
+        pdf_filename=session.pdf_filename,
+        supplier_confirmed=False,
+        detection=DetectionInfoResponse(**detection),
+        summary=summary,
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/supplier-pdf/confirm",
+    response_model=UploadPdfResponse,
+)
+def confirm_supplier_pdf(
+    session_id: str,
+    body: ConfirmSupplierRequest,
+    service: ProcessingService = Depends(get_processing_service),
+) -> UploadPdfResponse:
+    """Confirm the supplier and parse prices from the already-uploaded PDF."""
+    try:
+        service.confirm_supplier_pdf(session_id, supplier_key=body.supplier_key)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="session not found") from exc
+    except UnsupportedSupplierError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SupplierPdfError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return UploadPdfResponse(**_summary(service, session_id).model_dump())
+
+
+@router.post(
     "/sessions/{session_id}/supplier-pdf",
     response_model=UploadPdfResponse,
 )
@@ -89,6 +152,7 @@ async def upload_supplier_pdf(
     file: UploadFile = File(...),
     service: ProcessingService = Depends(get_processing_service),
 ) -> UploadPdfResponse:
+    """Upload + parse with an explicit supplier key (confirmation via API)."""
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="expected a .pdf upload")
     try:
@@ -304,6 +368,13 @@ def download_excel(
         session = service.get_session(session_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
+    if not session.supplier_confirmed:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Supplier has not been confirmed; confirm the detected supplier first"
+            ),
+        )
     if session.output_path is None or not session.output_path.is_file():
         raise HTTPException(status_code=404, detail="export not available; run export first")
     download_name = "pioneers_updated.xlsx"

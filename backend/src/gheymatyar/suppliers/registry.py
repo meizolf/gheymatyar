@@ -4,11 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pathlib import Path
+
 from gheymatyar.suppliers.abrahan_pipe import AbrahanPipeProcessor
 from gheymatyar.suppliers.azin_pipe import AzinPipeProcessor
 from gheymatyar.suppliers.base import BaseSupplierProcessor
+from gheymatyar.suppliers.detection import (
+    DetectionResult,
+    SupplierDetector,
+    matching_strong_markers,
+)
 from gheymatyar.suppliers.dina_polymer import DinaPolymerProcessor
-from gheymatyar.suppliers.errors import UnsupportedSupplierError
+from gheymatyar.suppliers.errors import SupplierPdfError, UnsupportedSupplierError
 from gheymatyar.suppliers.newpipe import NewPipeProcessor
 from gheymatyar.suppliers.top_industrial import TopIndustrialProcessor
 
@@ -58,6 +65,35 @@ class SupplierProcessorRegistry:
 
     def keys(self) -> list[str]:
         return sorted(self._processors)
+
+    def detect(self, path: str | Path) -> DetectionResult:
+        """Identify the most likely registered supplier from PDF content."""
+        return SupplierDetector(self).detect(path)
+
+    def validate_pdf_for_supplier(self, path: str | Path, supplier_key: str) -> None:
+        """Ensure the PDF matches ``supplier_key`` and no other registered brand.
+
+        Finding one matching brand must not authorize pages that belong to a
+        different supported supplier.
+        """
+        processor = self.get(supplier_key)
+        text = processor.read_pdf_identity_text(path)
+        processor.validate_pdf_identity(path, text=text)
+
+        conflicts: list[str] = []
+        for info in self.list_suppliers():
+            if info.key == processor.supplier_key:
+                continue
+            other = self.get(info.key)
+            hits = matching_strong_markers(text, other.detection_rules())
+            if hits:
+                conflicts.append(other.display_name)
+        if conflicts:
+            names = "، ".join(conflicts)
+            raise SupplierPdfError(
+                f"PDF also identifies as {names}; "
+                f"refusing mixed supplier document for {processor.display_name}"
+            )
 
 
 _DEFAULT: SupplierProcessorRegistry | None = None

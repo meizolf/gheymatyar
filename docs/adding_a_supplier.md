@@ -7,9 +7,13 @@ services (Excel parse/write, name matching, sessions, API) stay unchanged.
 
 1. Provide a **real PDF sample** and written business rules (especially pricing).
 2. Implement a processor class extending `BaseSupplierProcessor`.
-3. Register it in `get_default_registry()`.
-4. Add fixtures under `fixtures/suppliers/` and tests under `backend/tests/`.
-5. Expose it automatically via `GET /api/suppliers`.
+3. Override `detection_rules()` with brand names, keywords, and websites so
+   `SupplierDetector` can suggest the supplier from PDF **content** (not the
+   filename). Detection is only a suggestion; the UI always requires confirmation
+   before prices are parsed.
+4. Register it in `get_default_registry()`.
+5. Add fixtures under `fixtures/suppliers/` and tests under `backend/tests/`.
+6. Expose it automatically via `GET /api/suppliers`.
 
 Do **not** invent pricing formulas. If the PDF does not make the final sale
 price interpretation clear, stop and ask for clarification.
@@ -29,6 +33,14 @@ from gheymatyar.suppliers.base import BaseSupplierProcessor, SupplierParseResult
 class MySupplierProcessor(BaseSupplierProcessor):
     supplier_key = "my_supplier"          # stable API key
     display_name = "نام تامین‌کننده"      # UI label
+
+    def detection_rules(self):
+        from gheymatyar.suppliers.detection import DetectionRules
+        return DetectionRules(
+            strong_markers=("نام تامین‌کننده", "برند"),
+            weak_markers=("کلیدواژه محصول",),
+            websites=("example.com",),
+        )
 
     def parse_pdf(self, path: str | Path) -> SupplierParseResult:
         items: list[SupplierPriceItem] = []

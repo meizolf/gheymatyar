@@ -34,6 +34,14 @@ const PATTERNS: Array<{ re: RegExp; fa: string | ((m: RegExpMatchArray) => strin
     fa: 'ابتدا فایل PDF تأمین‌کننده را بارگذاری کنید.',
   },
   {
+    re: /Supplier has not been confirmed/i,
+    fa: 'ابتدا شرکت تأمین‌کننده شناسایی‌شده را تأیید کنید.',
+  },
+  {
+    re: /detect a PDF first/i,
+    fa: 'ابتدا فایل PDF را بارگذاری کنید تا شرکت شناسایی شود.',
+  },
+  {
     re: /no Pioneers product at row (\d+)/i,
     fa: (m) => `محصول پایونیرز در ردیف ${m[1]} یافت نشد.`,
   },

@@ -13,6 +13,8 @@ export const summaryFixture: SessionSummary = {
   session_id: 'sess-1',
   supplier_key: 'azin_pipe',
   supplier_display_name: 'آذین لوله',
+  supplier_confirmed: true,
+  detection: null,
   pioneers_filename: 'pioneers.xlsx',
   pdf_filename: 'azin.pdf',
   product_count: 100,

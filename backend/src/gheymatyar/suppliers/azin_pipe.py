@@ -24,6 +24,7 @@ import pdfplumber
 from gheymatyar.domain.supplier_item import SupplierPriceItem
 from gheymatyar.services.name_normalization import normalize_digits, normalize_product_name
 from gheymatyar.suppliers.base import BaseSupplierProcessor, SupplierParseResult
+from gheymatyar.suppliers.detection import DetectionRules
 from gheymatyar.suppliers.errors import SupplierPdfError
 
 SUPPLIER_KEY = "azin_pipe"
@@ -153,6 +154,14 @@ class AzinPipeProcessor(BaseSupplierProcessor):
 
     supplier_key = SUPPLIER_KEY
     display_name = SUPPLIER_DISPLAY_NAME
+
+    def detection_rules(self) -> DetectionRules:
+        return DetectionRules(
+            strong_markers=("آذین لوله", "آذین", "اذین", "نیذآ"),
+            weak_markers=("اتصالات پلی پروپیلن",),
+            supporting_markers=("پلی پروپیلن",),
+            websites=(),
+        )
 
     def parse_pdf(self, path: str | Path) -> SupplierParseResult:
         source = Path(path)

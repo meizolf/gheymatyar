@@ -2,6 +2,7 @@ import { ApiError } from './errors'
 import type {
   Candidate,
   CandidatesResponse,
+  DetectSupplierResponse,
   ExportResponse,
   Mapping,
   MappingsListResponse,
@@ -113,6 +114,25 @@ export const api = {
       { method: 'POST', body: form },
     )
   },
+
+  detectSupplierPdf: (sessionId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return requestJson<DetectSupplierResponse>(
+      `/sessions/${encodeURIComponent(sessionId)}/supplier-pdf/detect`,
+      { method: 'POST', body: form },
+    )
+  },
+
+  confirmSupplierPdf: (sessionId: string, supplierKey: string) =>
+    requestJson<SessionSummary>(
+      `/sessions/${encodeURIComponent(sessionId)}/supplier-pdf/confirm`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ supplier_key: supplierKey }),
+      },
+    ),
 
   uploadSupplierPdf: (sessionId: string, supplierKey: string, file: File) => {
     const form = new FormData()

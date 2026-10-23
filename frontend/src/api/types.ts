@@ -5,6 +5,26 @@ export interface SupplierInfo {
   display_name: string
 }
 
+export type DetectionConfidence = 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN'
+
+export interface DetectionInfo {
+  detected_supplier_id: string | null
+  detected_supplier_name: string | null
+  confidence: DetectionConfidence | string
+  evidence: string[]
+  requires_confirmation: boolean
+  text_extracted?: boolean
+  ocr_used?: boolean
+}
+
+export interface DetectSupplierResponse {
+  session_id: string
+  pdf_filename: string | null
+  supplier_confirmed: boolean
+  detection: DetectionInfo
+  summary: SessionSummary
+}
+
 export interface InvalidRow {
   row_number: number
   column: string | null
@@ -17,6 +37,8 @@ export interface SessionSummary {
   session_id: string
   supplier_key: string | null
   supplier_display_name: string | null
+  supplier_confirmed?: boolean
+  detection?: DetectionInfo | null
   pioneers_filename: string | null
   pdf_filename: string | null
   product_count: number

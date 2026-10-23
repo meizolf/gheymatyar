@@ -25,6 +25,8 @@ class ProcessingSession:
     created_at: float
     supplier_key: str | None = None
     supplier_display_name: str | None = None
+    #: True only after the user (or an explicit API supplier_key upload) confirms.
+    supplier_confirmed: bool = False
     pioneers_filename: str | None = None
     pioneers_path: Path | None = None
     pdf_filename: str | None = None

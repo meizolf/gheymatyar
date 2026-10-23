@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../api/client'
 import { isApiError } from '../api/errors'
+import type { DetectionInfo } from '../api/types'
 import { FileDropzone } from '../components/FileDropzone'
 import { Alert } from '../components/ui/Alert'
 import { Button } from '../components/ui/Button'
@@ -34,6 +35,13 @@ export function ImportStep() {
   const [supplierKey, setSupplierKey] = useState(
     () => summary?.supplier_key ?? '',
   )
+  const [detection, setDetection] = useState<DetectionInfo | null>(
+    () => summary?.detection ?? null,
+  )
+  const [supplierConfirmed, setSupplierConfirmed] = useState(
+    () => Boolean(summary?.supplier_confirmed),
+  )
+  const [changingSupplier, setChangingSupplier] = useState(false)
   const [excelError, setExcelError] = useState<string | null>(null)
   const [pdfError, setPdfError] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
@@ -43,9 +51,7 @@ export function ImportStep() {
     queryFn: api.listSuppliers,
   })
 
-  const busy =
-    exportInFlight ||
-    pendingSessionOps > 0
+  const busy = exportInFlight || pendingSessionOps > 0
 
   const uploadExcel = useMutation({
     mutationFn: async (file: File) => {
@@ -71,7 +77,6 @@ export function ImportStep() {
         setFormError(translateApiDetail(err.detail))
         return
       }
-      // Keep previous accepted filename from summary; clear optimistic pending name on hard fail display
       setExcelError(
         translateApiDetail(
           isApiError(err) ? err.detail : 'خطا در بارگذاری اکسل',
@@ -80,19 +85,73 @@ export function ImportStep() {
     },
   })
 
-  const uploadPdf = useMutation({
+  const detectPdf = useMutation({
+    mutationFn: async (file: File) => {
+      const sid = await ensureSession()
+      return enqueueSessionOp(() => api.detectSupplierPdf(sid, file))
+    },
+    onSuccess: async (data) => {
+      setSummary(data.summary)
+      setDetection(data.detection)
+      setSupplierConfirmed(false)
+      setChangingSupplier(false)
+      setPendingPdf(null)
+      setPdfError(null)
+      setFormError(null)
+      clearRestoreError()
+      const suggested =
+        data.detection.detected_supplier_id ??
+        data.summary.supplier_key ??
+        ''
+      setSupplierKey(suggested)
+      invalidateDownstream()
+      await invalidateSessionData(
+        queryClient,
+        data.session_id,
+        data.summary.supplier_key,
+      )
+    },
+    onError: (err) => {
+      if (isApiError(err) && err.sessionExpired) {
+        reset()
+        setFormError(translateApiDetail(err.detail))
+        return
+      }
+      // Keep local pending PDF so the user can still pick a supplier manually.
+      setDetection(null)
+      setSupplierConfirmed(false)
+      setChangingSupplier(true)
+      setPdfError(
+        translateApiDetail(
+          isApiError(err) ? err.detail : 'خطا در شناسایی PDF',
+        ),
+      )
+    },
+  })
+
+  const confirmPdf = useMutation({
     mutationFn: async ({
-      file,
       key,
+      recoveryFile,
     }: {
-      file: File
       key: string
+      recoveryFile: File | null
     }) => {
       const sid = await ensureSession()
-      return enqueueSessionOp(() => api.uploadSupplierPdf(sid, key, file))
+      // Detection request failed before the server stored the PDF — re-upload
+      // with the explicit supplier key (still validates identity/format).
+      if (recoveryFile) {
+        return enqueueSessionOp(() =>
+          api.uploadSupplierPdf(sid, key, recoveryFile),
+        )
+      }
+      return enqueueSessionOp(() => api.confirmSupplierPdf(sid, key))
     },
     onSuccess: async (data) => {
       setSummary(data)
+      setSupplierConfirmed(Boolean(data.supplier_confirmed))
+      setSupplierKey(data.supplier_key ?? supplierKey)
+      setChangingSupplier(false)
       setPendingPdf(null)
       setPdfError(null)
       setFormError(null)
@@ -110,9 +169,10 @@ export function ImportStep() {
         setFormError(translateApiDetail(err.detail))
         return
       }
+      setSupplierConfirmed(false)
       setPdfError(
         translateApiDetail(
-          isApiError(err) ? err.detail : 'خطا در بارگذاری PDF',
+          isApiError(err) ? err.detail : 'خطا در تأیید تأمین‌کننده',
         ),
       )
     },
@@ -139,7 +199,6 @@ export function ImportStep() {
         data.session_id,
         summary?.supplier_key,
       )
-      // Seed candidates cache so MatchingStep does not flash empty
       queryClient.setQueryData(['candidates', data.session_id], data)
       setStep(2)
     },
@@ -162,7 +221,13 @@ export function ImportStep() {
       setExcelError('فقط فایل .xlsx یا .xls پشتیبانی می‌شود (.xlsm مجاز نیست)')
       return
     }
-    if (uploadExcel.isPending || uploadPdf.isPending || matchMutation.isPending || busy) {
+    if (
+      uploadExcel.isPending ||
+      detectPdf.isPending ||
+      confirmPdf.isPending ||
+      matchMutation.isPending ||
+      busy
+    ) {
       setExcelError('لطفاً تا پایان عملیات جاری صبر کنید')
       return
     }
@@ -176,22 +241,73 @@ export function ImportStep() {
       setPdfError('فقط فایل PDF پشتیبانی می‌شود')
       return
     }
-    if (!supplierKey) {
-      setPdfError('ابتدا تأمین‌کننده را انتخاب کنید')
-      return
-    }
-    if (uploadExcel.isPending || uploadPdf.isPending || matchMutation.isPending || busy) {
+    if (
+      uploadExcel.isPending ||
+      detectPdf.isPending ||
+      confirmPdf.isPending ||
+      matchMutation.isPending ||
+      busy
+    ) {
       setPdfError('لطفاً تا پایان عملیات جاری صبر کنید')
       return
     }
+    // Replacing the PDF always resets confirmation.
     setPendingPdf(file)
     setPdfError(null)
-    uploadPdf.mutate({ file, key: supplierKey })
+    setSupplierConfirmed(false)
+    setChangingSupplier(false)
+    setDetection(null)
+    detectPdf.mutate(file)
   }
 
-  const excelReady = Boolean(summary?.pioneers_filename && summary.product_count > 0)
-  const pdfReady = Boolean(summary?.pdf_filename && summary.supplier_item_count > 0)
-  const uploading = uploadExcel.isPending || uploadPdf.isPending
+  function resetLocalState() {
+    setPendingExcel(null)
+    setPendingPdf(null)
+    setSupplierKey('')
+    setDetection(null)
+    setSupplierConfirmed(false)
+    setChangingSupplier(false)
+    setExcelError(null)
+    setPdfError(null)
+    setFormError(null)
+  }
+
+  const excelReady = Boolean(
+    summary?.pioneers_filename && summary.product_count > 0,
+  )
+  const pdfUploaded = Boolean(summary?.pdf_filename)
+  const pdfReady = Boolean(
+    supplierConfirmed &&
+      summary?.pdf_filename &&
+      (summary.supplier_item_count ?? 0) > 0,
+  )
+  const uploading =
+    uploadExcel.isPending || detectPdf.isPending || confirmPdf.isPending
+  const awaitingConfirmation = pdfUploaded && !supplierConfirmed
+  // Local file selected but not yet accepted by a successful detect — including
+  // a failed replacement over a previously confirmed PDF A.
+  const awaitingManualRecovery =
+    Boolean(pendingPdf) && !supplierConfirmed && !detectPdf.isPending
+  const showConfirmationPanel =
+    !supplierConfirmed &&
+    !detectPdf.isPending &&
+    (awaitingConfirmation || awaitingManualRecovery)
+  const suggestedName = detection?.detected_supplier_name ?? null
+  const selectedName =
+    suppliersQuery.data?.find((s) => s.key === supplierKey)?.display_name ||
+    summary?.supplier_display_name ||
+    null
+  const detectionFailed =
+    showConfirmationPanel &&
+    (awaitingManualRecovery ||
+      !detection?.detected_supplier_id ||
+      detection.confidence === 'UNKNOWN')
+  const needsManualSupplier =
+    Boolean(pdfError) ||
+    Boolean(pendingPdf) ||
+    detectionFailed ||
+    awaitingConfirmation ||
+    supplierConfirmed
   const canContinue =
     excelReady &&
     pdfReady &&
@@ -200,6 +316,15 @@ export function ImportStep() {
     !busy &&
     !excelError &&
     !pdfError
+
+  const supplierSelectLocked =
+    uploading ||
+    busy ||
+    (supplierConfirmed && !changingSupplier) ||
+    (awaitingConfirmation &&
+      !changingSupplier &&
+      !detectionFailed &&
+      Boolean(detection?.detected_supplier_id))
 
   return (
     <section className="panel">
@@ -219,9 +344,7 @@ export function ImportStep() {
               onClick={() => {
                 clearRestoreError()
                 reset()
-                setPendingExcel(null)
-                setPendingPdf(null)
-                setSupplierKey('')
+                resetLocalState()
               }}
             >
               شروع بارگذاری جدید
@@ -245,63 +368,141 @@ export function ImportStep() {
           hint="فقط نرخ فروش اصلی در خروجی تغییر می‌کند؛ فایل اصلی دست‌نخورده می‌ماند."
         />
 
-        <div className="field">
-          <label htmlFor="supplier">تأمین‌کننده</label>
-          {suppliersQuery.isLoading ? (
-            <Spinner label="در حال دریافت فهرست تأمین‌کنندگان…" />
-          ) : suppliersQuery.isError ? (
-            <Alert tone="error">
-              خطا در دریافت تأمین‌کنندگان:{' '}
-              {translateApiDetail(
-                isApiError(suppliersQuery.error)
-                  ? suppliersQuery.error.detail
-                  : undefined,
-              )}
-            </Alert>
-          ) : (
-            <select
-              id="supplier"
-              value={supplierKey}
-              disabled={uploading || busy}
-              onChange={(e) => {
-                setSupplierKey(e.target.value)
-                setPendingPdf(null)
-                setPdfError(null)
-              }}
-            >
-              <option value="">انتخاب کنید…</option>
-              {(suppliersQuery.data ?? []).map((s) => (
-                <option key={s.key} value={s.key}>
-                  {s.display_name}
-                </option>
-              ))}
-            </select>
-          )}
-          <p className="field-hint">
-            فقط تأمین‌کنندگانی که سرور پشتیبانی می‌کند نمایش داده می‌شوند.
-          </p>
-        </div>
-
         <FileDropzone
           label="لیست قیمت PDF تأمین‌کننده"
           accept=".pdf,application/pdf"
           pendingFile={pendingPdf}
           acceptedFilename={summary?.pdf_filename}
-          uploading={uploadPdf.isPending}
+          uploading={detectPdf.isPending}
           error={pdfError}
           disabled={uploading || matchMutation.isPending || busy}
           onSelect={onPdfSelect}
-          hint={
-            supplierKey
-              ? 'فرمت PDF مخصوص همین تأمین‌کننده است.'
-              : 'ابتدا تأمین‌کننده را انتخاب کنید، سپس PDF را بارگذاری کنید.'
-          }
+          hint="پس از بارگذاری، شرکت به‌صورت خودکار شناسایی می‌شود و باید تأیید شود."
         />
+
+        {needsManualSupplier ? (
+          <div className="field">
+            <label htmlFor="supplier">تأمین‌کننده</label>
+            {suppliersQuery.isLoading ? (
+              <Spinner label="در حال دریافت فهرست تأمین‌کنندگان…" />
+            ) : suppliersQuery.isError ? (
+              <Alert tone="error">
+                خطا در دریافت تأمین‌کنندگان:{' '}
+                {translateApiDetail(
+                  isApiError(suppliersQuery.error)
+                    ? suppliersQuery.error.detail
+                    : undefined,
+                )}
+              </Alert>
+            ) : (
+              <select
+                id="supplier"
+                value={supplierKey}
+                disabled={supplierSelectLocked}
+                onChange={(e) => {
+                  setSupplierKey(e.target.value)
+                  setPdfError(null)
+                  if (supplierConfirmed) {
+                    setSupplierConfirmed(false)
+                  }
+                }}
+              >
+                <option value="">انتخاب کنید…</option>
+                {(suppliersQuery.data ?? []).map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.display_name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <p className="field-hint">
+              فقط تأمین‌کنندگانی که سرور پشتیبانی می‌کند نمایش داده می‌شوند.
+            </p>
+          </div>
+        ) : null}
       </div>
 
-      {uploading ? <Spinner label="در حال ارسال و پردازش فایل…" /> : null}
+      {showConfirmationPanel ? (
+        <div className="summary-box">
+          <h2>تأیید شرکت تأمین‌کننده</h2>
+          {detectionFailed ? (
+            <Alert tone="warning">
+              {awaitingManualRecovery
+                ? 'شناسایی خودکار ناموفق بود، اما فایل PDF برای تأیید دستی نگه داشته شد. لطفاً تأمین‌کننده را انتخاب و تأیید کنید.'
+                : 'شرکت به‌صورت خودکار شناسایی نشد. لطفاً تأمین‌کننده را از فهرست انتخاب کنید و تأیید نمایید.'}
+            </Alert>
+          ) : (
+            <Alert tone="info">
+              {suggestedName ? (
+                <p>
+                  پیشنهاد سامانه:{' '}
+                  <strong>{suggestedName}</strong>
+                  {detection?.confidence ? (
+                    <span className="field-hint">
+                      {' '}
+                      (اطمینان: {detection.confidence})
+                    </span>
+                  ) : null}
+                </p>
+              ) : null}
+              <p>
+                آیا این لیست قیمت متعلق به شرکت{' '}
+                <strong>{selectedName ?? 'انتخاب‌شده'}</strong> است؟
+              </p>
+            </Alert>
+          )}
+          {(changingSupplier || detectionFailed) && !suppliersQuery.isLoading ? (
+            <p className="field-hint">
+              در صورت نیاز، شرکت را از فهرست بالا تغییر دهید و سپس تأیید کنید.
+            </p>
+          ) : null}
+          <div className="step-actions">
+            <Button
+              disabled={
+                !supplierKey ||
+                confirmPdf.isPending ||
+                detectPdf.isPending ||
+                busy
+              }
+              onClick={() =>
+                confirmPdf.mutate({
+                  key: supplierKey,
+                  // Always upload the pending local file; never confirm stale A.
+                  recoveryFile: pendingPdf,
+                })
+              }
+            >
+              {confirmPdf.isPending ? 'در حال تأیید…' : 'تأیید شرکت'}
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={
+                confirmPdf.isPending ||
+                detectPdf.isPending ||
+                busy ||
+                awaitingManualRecovery
+              }
+              onClick={() => setChangingSupplier(true)}
+            >
+              تغییر شرکت
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
-      {summary && (excelReady || pdfReady) ? (
+      {uploading ? (
+        <Spinner
+          label={
+            detectPdf.isPending
+              ? 'در حال شناسایی تأمین‌کننده…'
+              : confirmPdf.isPending
+                ? 'در حال استخراج قیمت‌ها…'
+                : 'در حال ارسال و پردازش فایل…'
+          }
+        />
+      ) : null}
+
+      {summary && (excelReady || pdfReady || pdfUploaded) ? (
         <div className="summary-box">
           <h2>نتیجه بارگذاری</h2>
           <div className="chip-row">
@@ -318,6 +519,7 @@ export function ImportStep() {
             {summary.supplier_display_name ? (
               <span className="chip">
                 تأمین‌کننده: <strong>{summary.supplier_display_name}</strong>
+                {supplierConfirmed ? null : ' (در انتظار تأیید)'}
               </span>
             ) : null}
             {summary.pdf_filename ? (
@@ -383,12 +585,7 @@ export function ImportStep() {
           disabled={uploading || matchMutation.isPending || busy}
           onClick={() => {
             reset()
-            setPendingExcel(null)
-            setPendingPdf(null)
-            setSupplierKey('')
-            setExcelError(null)
-            setPdfError(null)
-            setFormError(null)
+            resetLocalState()
           }}
         >
           شروع مجدد
