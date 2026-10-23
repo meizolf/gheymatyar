@@ -445,13 +445,26 @@ def test_html_azin_xls_plus_pdf_export_workflow(client, tmp_path: Path) -> None:
     assert match.status_code == 200, match.text
     preview = client.get(f"/api/sessions/{sid}/preview").json()["candidates"]
     keep = next(c for c in preview if c["status"] == "MATCHED")
-    assert keep["exportable"] is False
-    assert any("price basis:" in blocker for blocker in keep["pricing_blockers"])
+    assert keep["pricing_blockers"] == []
+    if keep["warnings"] or not keep["exportable"]:
+        approved = client.post(
+            f"/api/sessions/{sid}/candidates/{keep['candidate_id']}/review",
+            json={"decision": "APPROVE"},
+        )
+        assert approved.status_code == 200, approved.text
+    for row in preview:
+        if row["candidate_id"] == keep["candidate_id"]:
+            continue
+        excluded = client.post(
+            f"/api/sessions/{sid}/candidates/{row['candidate_id']}/review",
+            json={"decision": "EXCLUDE"},
+        )
+        assert excluded.status_code == 200, excluded.text
     export = client.post(f"/api/sessions/{sid}/export")
-    assert export.status_code == 400
+    assert export.status_code == 200, export.text
+    assert export.json()["updated_count"] == 1
     assert _sha256(HTML_AZIN) == before
     assert source_matrix
-    assert _sha256(HTML_AZIN) == before
     assert html_rows[0][36].strip() == HEADER_SALE_PRICE
 
 
@@ -572,19 +585,23 @@ def test_original_html_xls_plus_azin_pdf_export_workflow(client, tmp_path: Path)
     preview = client.get(f"/api/sessions/{sid}/preview").json()["candidates"]
     matched = [c for c in preview if c["status"] == "MATCHED"]
     assert matched, "expected at least one MATCHED candidate against full catalog"
-    assert all(row["exportable"] is False for row in matched)
-    assert all(
-        any(
-            blocker.startswith("price basis:") or blocker.startswith("sale currency:")
-            for blocker in row["pricing_blockers"]
+    assert all(not row["pricing_blockers"] for row in matched)
+    keep = matched[0]
+    if keep["warnings"] or not keep["exportable"]:
+        approved = client.post(
+            f"/api/sessions/{sid}/candidates/{keep['candidate_id']}/review",
+            json={"decision": "APPROVE"},
         )
-        for row in matched
-    )
-    approved = client.post(
-        f"/api/sessions/{sid}/candidates/{matched[0]['candidate_id']}/review",
-        json={"decision": "APPROVE"},
-    )
-    assert approved.status_code == 400
+        assert approved.status_code == 200, approved.text
+    for row in preview:
+        if row["candidate_id"] == keep["candidate_id"]:
+            continue
+        excluded = client.post(
+            f"/api/sessions/{sid}/candidates/{row['candidate_id']}/review",
+            json={"decision": "EXCLUDE"},
+        )
+        assert excluded.status_code == 200, excluded.text
     export = client.post(f"/api/sessions/{sid}/export")
-    assert export.status_code == 400
+    assert export.status_code == 200, export.text
+    assert export.json()["updated_count"] == 1
     assert _sha256(ORIGINAL_HTML_XLS) == before

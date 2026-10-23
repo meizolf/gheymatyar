@@ -29,6 +29,7 @@ const CURRENCY_LABEL: Record<string, string> = {
 const BASIS_LABEL: Record<string, string> = {
   meter: 'هر متر',
   piece: 'هر عدد',
+  printed: 'مبلغ چاپی',
   listed: 'قیمت اعلام‌شده',
 }
 

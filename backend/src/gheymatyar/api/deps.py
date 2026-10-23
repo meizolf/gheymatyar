@@ -10,14 +10,20 @@ from fastapi import Request
 from sqlalchemy.orm import Session
 
 from gheymatyar.db.database import Database
+from gheymatyar.domain.sale_policy import (
+    PIONEERS_SALE_CURRENCY,
+    SETTING_SALE_BASIS_KEY,
+    SETTING_SALE_CURRENCY_KEY,
+)
 from gheymatyar.services.processing import ProcessingService
 from gheymatyar.services.session_store import SessionStore
 
 DEFAULT_SETTING_KEYS = {
     "suspicious_percent_threshold": "30",
-    # Blank means the Pioneers sale column's currency/basis is not confirmed.
-    "pioneers_sale_currency": "",
-    "pioneers_sale_basis": "",
+    # Confirmed: نرخ فروش اصلی is Rial. Empty string still means "revoked".
+    SETTING_SALE_CURRENCY_KEY: PIONEERS_SALE_CURRENCY,
+    # Blank means the sale basis is not confirmed when the workbook has no unit.
+    SETTING_SALE_BASIS_KEY: "",
 }
 
 

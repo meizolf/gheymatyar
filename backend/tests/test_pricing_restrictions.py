@@ -1,4 +1,4 @@
-"""Mapping confirmation must not clear supplier price restrictions."""
+"""Mapping confirmation must not clear genuine supplier price restrictions."""
 
 from __future__ import annotations
 
@@ -116,16 +116,17 @@ def _confirm_still_blocked(
     assert any(warning_fragment in warning for warning in reused["pricing_blockers"])
 
 
-def test_confirm_mapping_keeps_top_toman_block(
-    client: TestClient, pioneers_azin_excel: Path, top_pdf: Path
+def test_confirm_mapping_keeps_dina_drip_name_collision_block(
+    client: TestClient, pioneers_azin_excel: Path, dina_pdf: Path
 ) -> None:
+    """Duplicate drip descriptors with distinct codes stay blocked after mapping."""
     _confirm_still_blocked(
         client,
         excel=pioneers_azin_excel,
-        pdf=top_pdf,
-        supplier_key="top_industrial",
-        needle={"supplier_name": "تاپ فلاش تانک پاریس", "new_price": "3240000"},
-        warning_fragment="Toman",
+        pdf=dina_pdf,
+        supplier_key="dina_polymer",
+        needle={"supplier_code": "825952020", "new_price": "198440"},
+        warning_fragment="shared by products",
     )
 
 
@@ -199,14 +200,6 @@ def test_revoking_sale_policy_drops_existing_workbook(
     assert row["new_price"] == keep["new_price"]
 
 
-def test_confirm_mapping_keeps_dina_uncertain_fitting_block(
-    client: TestClient, pioneers_azin_excel: Path, dina_pdf: Path
-) -> None:
-    _confirm_still_blocked(
-        client,
-        excel=pioneers_azin_excel,
-        pdf=dina_pdf,
-        supplier_key="dina_polymer",
-        needle={"supplier_code": "855441118", "new_price": "67760"},
-        warning_fragment="#N/A",
-    )
+def test_default_settings_confirm_pioneers_sale_currency_is_rial(client: TestClient) -> None:
+    body = client.get("/api/settings").json()["settings"]
+    assert body["pioneers_sale_currency"] == "rial"

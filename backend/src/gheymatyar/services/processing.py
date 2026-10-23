@@ -11,6 +11,11 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from gheymatyar.domain.enums import MappingType, MatchStatus, ReviewDecision
+from gheymatyar.domain.sale_policy import (
+    PIONEERS_SALE_CURRENCY,
+    SETTING_SALE_BASIS_KEY,
+    SETTING_SALE_CURRENCY_KEY,
+)
 from gheymatyar.domain.update_candidate import UpdateCandidate
 from gheymatyar.parsers.pioneers_excel_parser import PioneersExcelParser
 from gheymatyar.parsers.pioneers_html_xls import convert_pioneers_html_xls_to_xlsx
@@ -46,8 +51,6 @@ from gheymatyar.suppliers.registry import SupplierProcessorRegistry, get_default
 
 _SAFE_FILENAME_RE = re.compile(r"[^\w.\-()+ \u0600-\u06FF]+", re.UNICODE)
 SETTING_THRESHOLD_KEY = "suspicious_percent_threshold"
-SETTING_SALE_CURRENCY_KEY = "pioneers_sale_currency"
-SETTING_SALE_BASIS_KEY = "pioneers_sale_basis"
 
 
 def _setting_text(db_session: Session, key: str) -> str | None:
@@ -59,10 +62,17 @@ def _setting_text(db_session: Session, key: str) -> str | None:
 
 
 def _stored_sale_policy(db_session: Session) -> tuple[str | None, str | None]:
-    return (
-        _setting_text(db_session, SETTING_SALE_CURRENCY_KEY),
-        _setting_text(db_session, SETTING_SALE_BASIS_KEY),
-    )
+    """Return the active sale policy.
+
+    Currency falls back to the confirmed Rial default when the setting row has
+    never been written. An explicitly cleared (empty) value stays unconfirmed.
+    """
+    currency_row = SettingsRepository(db_session).get(SETTING_SALE_CURRENCY_KEY)
+    if currency_row is None:
+        currency: str | None = PIONEERS_SALE_CURRENCY
+    else:
+        currency = str(currency_row.value).strip() or None
+    return currency, _setting_text(db_session, SETTING_SALE_BASIS_KEY)
 
 
 def _remember_sale_policy(

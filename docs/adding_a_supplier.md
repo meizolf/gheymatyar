@@ -18,6 +18,22 @@ services (Excel parse/write, name matching, sessions, API) stay unchanged.
 Do **not** invent pricing formulas. If the PDF does not make the final sale
 price interpretation clear, stop and ask for clarification.
 
+## Confirmed pricing policy
+
+- Pioneers `نرخ فروش اصلی` is **Rial** (`gheymatyar.domain.sale_policy.PIONEERS_SALE_CURRENCY`).
+- Keep monetary values as `Decimal`. Put original supplier currency and amount
+  in `raw_values` (`original_currency`, `original_price`).
+- Set `raw_values["currency"]` to the currency of the **exported** sale price
+  (Rial after any confirmed conversion).
+- When the PDF price column is reliably identified and the printed amount is
+  the sale price as-is, use `price_basis="printed"` so generic “listed” blockers
+  do not apply. Still block malformed, duplicate, or ambiguous rows.
+- Put hard export restrictions in `raw_values["pricing_blockers"]` /
+  `review_warnings`. Soft notes alone must not use those keys if export should
+  proceed.
+- Override `calculate_final_sale_price` only for explicit rules (e.g. TOP
+  Toman → Rial `× 10`).
+
 ## Minimal implementation
 
 Create `backend/src/gheymatyar/suppliers/my_supplier.py`:

@@ -21,6 +21,7 @@ from typing import Any
 
 import pdfplumber
 
+from gheymatyar.domain.sale_policy import PIONEERS_SALE_CURRENCY, PRICE_BASIS_PRINTED
 from gheymatyar.domain.supplier_item import SupplierPriceItem
 from gheymatyar.services.name_normalization import normalize_digits, normalize_product_name
 from gheymatyar.suppliers.base import BaseSupplierProcessor, SupplierParseResult
@@ -220,13 +221,14 @@ class AzinPipeProcessor(BaseSupplierProcessor):
                 "source_path": str(source),
                 "page_count": page_count,
                 "item_count": len(items),
+                "currency": PIONEERS_SALE_CURRENCY,
                 "pricing_rule": "direct_replacement_vat_inclusive",
                 "vat_note": "PDF prices already include 10% VAT",
             },
         )
 
     def calculate_final_sale_price(self, item: SupplierPriceItem) -> Decimal:
-        # Confirmed by PDF footer: listed Rial prices include 10% VAT.
+        # Confirmed: printed Rial (VAT included). No length/carton multiply.
         return item.price
 
     def normalize_supplier_name(self, name: str) -> str:
@@ -362,8 +364,10 @@ class AzinPipeProcessor(BaseSupplierProcessor):
                 "column": column,
                 "table_row": row_index,
                 "price_raw": price_raw,
-                "currency": "rial",
-                "price_basis": "listed",
+                "currency": PIONEERS_SALE_CURRENCY,
+                "original_currency": PIONEERS_SALE_CURRENCY,
+                "original_price": str(price),
+                "price_basis": PRICE_BASIS_PRINTED,
                 "tax": "included_10_percent",
             },
         )

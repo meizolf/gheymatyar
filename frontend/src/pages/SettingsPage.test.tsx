@@ -29,14 +29,22 @@ function renderSettings() {
 describe('SettingsPage', () => {
   beforeEach(() => {
     vi.mocked(api.getSettings).mockResolvedValue({
-      settings: { suspicious_percent_threshold: '30' },
+      settings: {
+        suspicious_percent_threshold: '30',
+        pioneers_sale_currency: 'rial',
+        pioneers_sale_basis: '',
+      },
     })
   })
 
   it('loads and saves threshold', async () => {
     const user = userEvent.setup()
     vi.mocked(api.updateSettings).mockResolvedValue({
-      settings: { suspicious_percent_threshold: '25' },
+      settings: {
+        suspicious_percent_threshold: '25',
+        pioneers_sale_currency: 'rial',
+        pioneers_sale_basis: '',
+      },
     })
     const { client } = renderSettings()
     const input = await screen.findByLabelText(/آستانه هشدار/)
@@ -47,7 +55,7 @@ describe('SettingsPage', () => {
     await waitFor(() => {
       expect(api.updateSettings).toHaveBeenCalledWith({
         suspicious_percent_threshold: '25',
-        pioneers_sale_currency: '',
+        pioneers_sale_currency: 'rial',
         pioneers_sale_basis: '',
       })
     })

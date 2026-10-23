@@ -92,17 +92,15 @@ macOS cannot produce the Windows EXE; use the Actions artifact or a Windows buil
 
 ### Supplier support
 
-Only `نرخ فروش اصلی` is written. Printed amounts are not converted, multiplied by carton or meterage, or adjusted for VAT. The workbook has no currency or unit column. Until settings confirm that the sale column is Rial and, when a row has no unit, per metre or per piece, export stays blocked. A per-metre price is never written onto a branch unit such as `شاخه 6 متری`. A supplier amount whose own basis is only “as listed” stays blocked as well, including آذین، نیوپایپ، and آبراهان. Rows with an unresolved price stay blocked after mapping confirmation and after APPROVE.
+Only `نرخ فروش اصلی` is written. That column is confirmed **Rial** (default setting; original supplier currency/amount stay in metadata). Amounts use `Decimal` — never float. Carton/meterage package sizes are never multiplied into the sale price, and VAT is not invented. A per-metre price is never written onto a branch unit such as `شاخه 6 متری`. Genuine extraction, duplicate-name, identity, and ambiguous-column blockers remain.
 
 | Key | List | Price handling |
 |---|---|---|
 | `azin_pipe` | آذین لوله | Printed Rial, 10% VAT included. Direct replacement. |
-| `top_industrial` | گروه صنعتی تاپ | Printed Toman. Export blocked until a Rial rule is confirmed. |
-| `dina_polymer` | دینا پلیمر | Rial. Pipe prices stay per meter. Fitting rows under `#N/A` are blocked. |
+| `top_industrial` | گروه صنعتی تاپ | Printed Toman → Rial with `× 10` (e.g. 3,240,000 Toman → 32,400,000 Rial). Carton qty not multiplied. |
+| `dina_polymer` | دینا پلیمر | Printed Rial. Pipe/drip prices stay per meter; fittings per piece. Fitting `#N/A` column is the price; drip table uses labeled `قیمت` (not adjacent `#N/A`). |
 | `newpipe` | نیوپایپ | Printed Rial, 10% VAT included. Package length is not multiplied. Same name with different prices is blocked. |
 | `abrahan_pipe` | آبراهان | Printed cash Rial. `موجود` rows are skipped. VAT is not stated. |
-
-The Pioneers workbook has no currency or unit column. These processors do not invent a conversion into that cell.
 
 Pars Plast, PG 234 (Polymer Golpayegan), and Kaveh Gostar are **not supported**. Their pages are image-only or the embedded font does not expose the printed prices. Offline Persian OCR is not bundled, and Windows offline OCR has not been verified, so those keys stay unregistered and return HTTP 400.
 

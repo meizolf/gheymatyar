@@ -6,10 +6,10 @@ The PDF is a 7-page text list. Each page is one table:
 
 Prices use ``.`` as a thousands separator and are printed in Toman.
 Carton quantity is not a price and is not multiplied into the amount.
-There is no confirmed rule that converts these Toman amounts into the
-Rial figures used by other Pioneers sale prices, so every row is flagged
-and blocked from automatic export. The stored amount is the printed Toman
-value, unchanged.
+
+Confirmed rule: convert printed Toman to Rial with ``price * 10``
+(Decimal) for the Pioneers ``نرخ فروش اصلی`` column. The original Toman
+amount and currency stay in item metadata.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from typing import Any
 
 import pdfplumber
 
+from gheymatyar.domain.sale_policy import PIONEERS_SALE_CURRENCY, TOMAN_TO_RIAL
 from gheymatyar.domain.supplier_item import SupplierPriceItem
 from gheymatyar.services.name_normalization import normalize_product_name
 from gheymatyar.suppliers.azin_pipe import fix_reversed_persian
@@ -31,11 +32,6 @@ from gheymatyar.suppliers.textutil import parse_grouped_amount, polish_persian
 
 SUPPLIER_KEY = "top_industrial"
 SUPPLIER_DISPLAY_NAME = "گروه صنعتی تاپ"
-
-TOMAN_EXPORT_WARNING = (
-    "price is in Toman as printed and was not converted to Rial; "
-    "automatic export is blocked until the Pioneers currency rule is confirmed"
-)
 
 _CODE_RE = re.compile(r"^(?=.*\d)[0-9A-Za-z]{3,}$")
 _SPELLING: tuple[tuple[str, str], ...] = (
@@ -173,15 +169,16 @@ class TopIndustrialProcessor(BaseSupplierProcessor):
                 "source_path": str(source),
                 "page_count": page_count,
                 "item_count": len(items),
-                "currency": "toman",
-                "pricing_rule": "printed_toman_amount_export_blocked",
+                "currency": PIONEERS_SALE_CURRENCY,
+                "original_currency": "toman",
+                "pricing_rule": "toman_times_10_to_rial",
                 "vat_note": "PDF does not state whether VAT is included",
             },
         )
 
     def calculate_final_sale_price(self, item: SupplierPriceItem) -> Decimal:
-        # Printed Toman amount. Not converted.
-        return item.price
+        """Convert printed Toman to Rial (×10). Carton quantity is ignored."""
+        return item.price * TOMAN_TO_RIAL
 
     def normalize_supplier_name(self, name: str) -> str:
         return normalize_product_name(name)
@@ -254,7 +251,9 @@ class TopIndustrialProcessor(BaseSupplierProcessor):
                     price=price,
                     unit="عدد",
                     raw_values={
-                        "currency": "toman",
+                        # Sale/export currency after ×10 conversion.
+                        "currency": PIONEERS_SALE_CURRENCY,
+                        "original_currency": "toman",
                         "original_price": str(price),
                         "original_price_text": price_raw,
                         "price_basis": "piece",
@@ -263,8 +262,8 @@ class TopIndustrialProcessor(BaseSupplierProcessor):
                         "table_row": row_index,
                         "source_row_number": row_raw or None,
                         "package_quantity": qty_raw or None,
-                        "review_warnings": [TOMAN_EXPORT_WARNING],
-                        "pricing_blockers": [TOMAN_EXPORT_WARNING],
+                        "review_warnings": [],
+                        "pricing_blockers": [],
                     },
                 )
             )

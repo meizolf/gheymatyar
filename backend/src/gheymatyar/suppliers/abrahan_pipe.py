@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pymupdf
 
+from gheymatyar.domain.sale_policy import PIONEERS_SALE_CURRENCY, PRICE_BASIS_PRINTED
 from gheymatyar.domain.supplier_item import SupplierPriceItem
 from gheymatyar.services.name_normalization import normalize_digits, normalize_product_name
 from gheymatyar.suppliers.base import BaseSupplierProcessor, SupplierParseResult
@@ -144,13 +145,14 @@ class AbrahanPipeProcessor(BaseSupplierProcessor):
                 "source_path": str(source),
                 "page_count": page_count,
                 "item_count": len(items),
-                "currency": "rial",
+                "currency": PIONEERS_SALE_CURRENCY,
                 "pricing_rule": "printed_cash_rial",
                 "vat_note": "PDF does not state whether VAT is included",
             },
         )
 
     def calculate_final_sale_price(self, item: SupplierPriceItem) -> Decimal:
+        # Confirmed cash Rial. Package quantity is not multiplied.
         return item.price
 
     def normalize_supplier_name(self, name: str) -> str:
@@ -234,10 +236,11 @@ class AbrahanPipeProcessor(BaseSupplierProcessor):
                     price=price,
                     unit=None,
                     raw_values={
-                        "currency": "rial",
+                        "currency": PIONEERS_SALE_CURRENCY,
+                        "original_currency": PIONEERS_SALE_CURRENCY,
                         "original_price": str(price),
                         "original_price_text": price_text,
-                        "price_basis": "listed",
+                        "price_basis": PRICE_BASIS_PRINTED,
                         "tax": "not_stated",
                         "page": page_number,
                         "column": side,

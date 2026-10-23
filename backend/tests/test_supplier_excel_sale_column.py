@@ -1,4 +1,4 @@
-"""Abrahan stays blocked on a workbook with no unit; a confirmed per-metre row does not."""
+"""Printed Rial suppliers export only نرخ فروش اصلی; originals stay untouched."""
 
 from __future__ import annotations
 
@@ -45,6 +45,7 @@ def test_abrahan_export_changes_only_final_sale_price(
     sheet = workbook.active
     headers = {cell.value: cell.column for cell in sheet[1]}
     name_col = headers[HEADER_NAME]
+    sale_col = headers[HEADER_SALE_PRICE]
     sheet.cell(2, name_col).value = item.supplier_name
     workbook.save(edited)
     workbook.close()
@@ -79,16 +80,34 @@ def test_abrahan_export_changes_only_final_sale_price(
     keep = next(row for row in candidates if row["supplier_name"] == item.supplier_name)
     assert keep["status"] == "MATCHED"
     assert keep["new_price"] == str(item.price)
-    assert keep["exportable"] is False
-    assert any("price basis:" in blocker for blocker in keep["pricing_blockers"])
-    review = client.post(
-        f"/api/sessions/{session_id}/candidates/{keep['candidate_id']}/review",
-        json={"decision": "APPROVE"},
-    )
-    assert review.status_code == 400
+    assert keep["pricing_blockers"] == []
+    if keep["warnings"]:
+        review = client.post(
+            f"/api/sessions/{session_id}/candidates/{keep['candidate_id']}/review",
+            json={"decision": "APPROVE"},
+        )
+        assert review.status_code == 200, review.text
+        assert review.json()["exportable"] is True
+    for candidate in candidates:
+        if candidate["candidate_id"] == keep["candidate_id"]:
+            continue
+        excluded = client.post(
+            f"/api/sessions/{session_id}/candidates/{candidate['candidate_id']}/review",
+            json={"decision": "EXCLUDE"},
+        )
+        assert excluded.status_code == 200, excluded.text
+
     export_resp = client.post(f"/api/sessions/{session_id}/export")
-    assert export_resp.status_code == 400
-    assert _snapshot(edited) == before
+    assert export_resp.status_code == 200, export_resp.text
+    assert export_resp.json()["updated_count"] == 1
+    download = client.get(f"/api/sessions/{session_id}/download")
+    assert download.status_code == 200
+    output = tmp_path / "out.xlsx"
+    output.write_bytes(download.content)
+    after = _snapshot(output)
+    changed = [key for key in before if before[key] != after[key]]
+    assert changed == [(2, sale_col)]
+    assert str(after[(2, sale_col)]).replace(",", "") == str(item.price)
     assert pioneers_azin_excel.read_bytes() == source_hash
 
 

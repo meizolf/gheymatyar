@@ -11,6 +11,10 @@ from gheymatyar.api.deps import (
     get_processing_service,
 )
 from gheymatyar.api.schemas import SettingsResponse, SettingsUpdateRequest
+from gheymatyar.domain.sale_policy import (
+    SETTING_SALE_BASIS_KEY,
+    SETTING_SALE_CURRENCY_KEY,
+)
 from gheymatyar.repositories.settings_repository import SettingsRepository
 from gheymatyar.services.price_validation import parse_suspicious_percent_threshold
 from gheymatyar.services.processing import ProcessingService, _stored_sale_policy
@@ -19,8 +23,8 @@ router = APIRouter(tags=["settings"])
 
 ALLOWED_KEYS = frozenset(DEFAULT_SETTING_KEYS)
 THRESHOLD_KEY = "suspicious_percent_threshold"
-SALE_CURRENCY_KEY = "pioneers_sale_currency"
-SALE_BASIS_KEY = "pioneers_sale_basis"
+SALE_CURRENCY_KEY = SETTING_SALE_CURRENCY_KEY
+SALE_BASIS_KEY = SETTING_SALE_BASIS_KEY
 
 
 @router.get("/settings", response_model=SettingsResponse)

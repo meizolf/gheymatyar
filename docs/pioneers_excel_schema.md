@@ -211,12 +211,14 @@ Barcodes are **identifiers**, never money/quantities:
 
 # Price Columns
 
-Observed storage in this converted file: **all price cells are strings of integer Rial/Toman amounts** (number format `General`). No formulas were found in price columns. No decimal points observed.
+Observed storage in this converted file: **all price cells are strings of integer amounts** (number format `General`). No formulas were found in price columns. No decimal points observed.
+
+**Confirmed business rule:** `نرخ فروش اصلی` (`sale_price`, column AK) is stored and exported in **Rial**. GheymatYar never writes any other column. Supplier Toman amounts (e.g. TOP) are converted with Decimal `× 10` before export; original supplier currency/amount remain in metadata only.
 
 | Header | Col | Index | Maps to | Blank | Zero | Negative | Notes |
 |---|---|---|---|---|---|---|---|
 | نرخ آخرین خرید | AH | 34 | `last_purchase_price` | none (filled) | many `"0"` | none | |
-| نرخ فروش اصلی | AK | 37 | `sale_price` | none (filled) | many `"0"` | none | Primary sale price |
+| نرخ فروش اصلی | AK | 37 | `sale_price` | none (filled) | many `"0"` | none | Primary sale price (**Rial**) |
 | نرخ مصرف کننده | AL | 38 | `consumer_price` | none (filled) | many `"0"` | **8 negatives** | Header clear; magnitudes sometimes look atypical vs sale price |
 | نرخ همکاری | AM | 39 | `colleague_price` | none (filled) | **all** `"0"` | none | Column present but unused in this export |
 | نرخ لوله کش | AN | 40 | _(unmapped)_ | none | almost all `"0"` | none | One non-zero sample observed |

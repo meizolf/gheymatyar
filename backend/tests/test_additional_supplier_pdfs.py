@@ -89,11 +89,13 @@ def test_top_extracts_printed_toman_prices(top_result) -> None:
     assert len(top_result.items) == 128
     paris = next(item for item in top_result.items if item.supplier_name == "تاپ فلاش تانک پاریس")
     assert paris.price == Decimal("3240000")
-    assert paris.raw_values["currency"] == "toman"
+    assert paris.raw_values["original_currency"] == "toman"
+    assert paris.raw_values["currency"] == "rial"
     assert paris.raw_values["price_basis"] == "piece"
     assert paris.raw_values["package_quantity"] == "5"
     assert paris.raw_values["page"] == 1
     assert paris.price != Decimal("32400000")
+    assert paris.raw_values["pricing_blockers"] == []
 
     oscar = next(item for item in top_result.items if item.supplier_name == "تاپ فلاش تانک اسکار")
     assert oscar.price == Decimal("3000000")
@@ -118,28 +120,36 @@ def test_top_extracts_printed_toman_prices(top_result) -> None:
     assert flex.raw_values["page"] == 7
 
 
-def test_top_toman_prices_block_automatic_export(top_result) -> None:
+def test_top_converts_toman_to_rial_for_export(top_result) -> None:
     processor = TopIndustrialProcessor()
     item = next(row for row in top_result.items if row.supplier_name == "تاپ فلاش تانک پاریس")
-    assert processor.calculate_final_sale_price(item) == Decimal("3240000")
+    # 3,240,000 Toman → 32,400,000 Rial; carton qty 5 is not multiplied.
+    assert processor.calculate_final_sale_price(item) == Decimal("32400000")
+    assert processor.calculate_final_sale_price(item) != item.price * 5
     product = PioneersProduct(
         row_number=2,
         name=item.supplier_name,
         code="T-1",
         sale_price=Decimal("24100000"),
+        unit="عدد",
     )
-    matched = match_supplier_items([item], [product], processor=processor)
+    matched = match_supplier_items(
+        [item],
+        [product],
+        processor=processor,
+        confirmed_sale_currency="rial",
+        confirmed_sale_basis="piece",
+    )
     enriched = apply_price_warnings(matched.candidates)
     assert enriched[0].status == "MATCHED"
-    assert enriched[0].new_price == Decimal("3240000")
-    assert any("Toman" in warning for warning in enriched[0].warnings)
-    assert enriched[0].pricing_blockers
-    assert enriched[0].source_currency == "toman"
-    assert is_exportable(enriched[0]) is False
+    assert enriched[0].new_price == Decimal("32400000")
+    assert enriched[0].source_currency == "rial"
+    assert enriched[0].pricing_blockers == []
+    assert is_exportable(enriched[0]) is False  # soft suspicious-% warning
     approved = enriched[0].model_copy(
         update={"review_decision": ReviewDecision.APPROVE}
     )
-    assert is_exportable(approved) is False
+    assert is_exportable(approved) is True
 
 
 def test_dina_keeps_per_meter_prices_and_piece_fittings(dina_result) -> None:
@@ -180,8 +190,10 @@ def test_dina_keeps_per_meter_prices_and_piece_fittings(dina_result) -> None:
     tee = _by_code(dina_result, "855441118")
     assert tee.price == Decimal("67760")
     assert tee.raw_values["price_basis"] == "piece"
+    assert tee.raw_values["price_column"] == "#N/A"
     assert "سه راهی" in tee.supplier_name
-    assert tee.raw_values["review_warnings"]
+    assert tee.raw_values["review_warnings"] == []
+    assert tee.raw_values["pricing_blockers"] == []
 
     elbow = _by_code(dina_result, "855441110")
     assert elbow.price == Decimal("68090")
@@ -189,25 +201,37 @@ def test_dina_keeps_per_meter_prices_and_piece_fittings(dina_result) -> None:
     assert elbow.raw_values["price_basis"] == "piece"
 
 
-def test_dina_na_header_blocks_automatic_export(dina_result) -> None:
+def test_dina_fitting_na_column_is_exportable_rial_price(dina_result) -> None:
     item = _by_code(dina_result, "855441118")
+    assert item.price == Decimal("67760")
     product = PioneersProduct(
         row_number=4,
         name=item.supplier_name,
         code="D-1",
         sale_price=item.price,
+        unit="عدد",
     )
     matched = match_supplier_items(
-        [item], [product], processor=DinaPolymerProcessor()
+        [item],
+        [product],
+        processor=DinaPolymerProcessor(),
+        confirmed_sale_currency="rial",
+        confirmed_sale_basis="piece",
     )
     enriched = apply_price_warnings(matched.candidates)
     assert enriched[0].status == "MATCHED"
-    assert enriched[0].pricing_blockers
-    assert is_exportable(enriched[0]) is False
-    approved = enriched[0].model_copy(
-        update={"review_decision": ReviewDecision.APPROVE}
-    )
-    assert is_exportable(approved) is False
+    assert enriched[0].pricing_blockers == []
+    assert enriched[0].new_price == Decimal("67760")
+    assert is_exportable(enriched[0]) is True
+
+
+def test_dina_drip_uses_gheymat_not_adjacent_na(dina_result) -> None:
+    drip = _by_code(dina_result, "825952020")
+    assert drip.price == Decimal("198440")
+    assert drip.raw_values["price_column"] == "قیمت"
+    assert drip.raw_values["ignored_column"] == "188100"
+    assert drip.raw_values["secondary_na_column"] == "188100"
+    assert drip.price != Decimal("188100")
 
 
 def test_dina_terminal_rows_keep_their_column_and_branch_length(dina_result) -> None:
@@ -318,26 +342,159 @@ def test_newpipe_keeps_section_headings_and_coil_form(newpipe_result) -> None:
     )
 
 
-def test_newpipe_identical_names_with_different_prices_are_blocked(newpipe_result) -> None:
-    smaller = _by_code(newpipe_result, "855121244")
-    larger = _by_code(newpipe_result, "855121236")
-    assert smaller.price == Decimal("5900070")
-    assert larger.price == Decimal("13387770")
-    assert normalize_product_name(smaller.supplier_name) == normalize_product_name(
+def test_newpipe_preserves_mixed_fraction_male_female_dimensions(newpipe_result) -> None:
+    male_large = _by_code(newpipe_result, "855121244")
+    male_small = _by_code(newpipe_result, "855121236")
+    mixed = _by_code(newpipe_result, "855121242")
+
+    assert male_large.price == Decimal("5900070")
+    assert male_small.price == Decimal("13387770")
+    assert mixed.price == Decimal("7837170")
+
+    assert male_large.raw_values["size"] == "روپیچ 1 1/4*توپیچ 1"
+    assert male_small.raw_values["size"] == "روپیچ 1*توپیچ 1 1/4"
+    assert mixed.raw_values["size"] == "روپیچ 1 1/4*توپیچ 3/4"
+    assert "1 1/4" in male_large.supplier_name and "توپیچ 1" in male_large.supplier_name
+    assert "روپیچ 1*" in male_small.supplier_name or "روپیچ 1*توپیچ" in male_small.supplier_name
+    assert "1 1/4" in male_small.supplier_name
+    assert "3/4" in mixed.supplier_name and "1 1/4" in mixed.supplier_name
+
+    assert normalize_product_name(male_large.supplier_name) != normalize_product_name(
+        male_small.supplier_name
+    )
+    assert normalize_product_name(male_large.supplier_name) != normalize_product_name(
+        mixed.supplier_name
+    )
+    assert normalize_product_name(male_small.supplier_name) != normalize_product_name(
+        mixed.supplier_name
+    )
+
+    # Reciprocal variants match independently and are not collision-blocked.
+    products = [
+        PioneersProduct(
+            row_number=2,
+            name=male_large.supplier_name,
+            code="NP-A",
+            sale_price=male_large.price,
+        ),
+        PioneersProduct(
+            row_number=3,
+            name=male_small.supplier_name,
+            code="NP-B",
+            sale_price=male_small.price,
+        ),
+    ]
+    matched = match_supplier_items(
+        [male_large, male_small],
+        products,
+        processor=NewPipeProcessor(),
+        confirmed_sale_currency="rial",
+    )
+    enriched = apply_price_warnings(matched.candidates)
+    assert len(enriched) == 2
+    assert all(candidate.status == "MATCHED" for candidate in enriched)
+    assert all(not candidate.pricing_blockers for candidate in enriched)
+    assert all(is_exportable(candidate) is True for candidate in enriched)
+
+
+def test_newpipe_single_labelled_reducing_caps_keep_distinct_sizes(
+    newpipe_result,
+) -> None:
+    """Page-6 reducing caps: overall size + female only — no invented male label."""
+    smaller = _by_code(newpipe_result, "855121936")
+    larger = _by_code(newpipe_result, "855121938")
+
+    assert smaller.price == Decimal("7732010")
+    assert larger.price == Decimal("8926940")
+    assert smaller.raw_values["size"] == "1 1/4*توپیچ 1/2"
+    assert larger.raw_values["size"] == "1 1/2*توپیچ 1/2"
+    assert "روپیچ" not in (smaller.raw_values["size"] or "")
+    assert "روپیچ" not in (larger.raw_values["size"] or "")
+    assert smaller.raw_values["pricing_blockers"] == []
+    assert larger.raw_values["pricing_blockers"] == []
+    assert "1 1/4" in smaller.supplier_name and "توپیچ 1/2" in smaller.supplier_name
+    assert "1 1/2" in larger.supplier_name and "توپیچ 1/2" in larger.supplier_name
+    assert normalize_product_name(smaller.supplier_name) != normalize_product_name(
         larger.supplier_name
+    )
+
+    products = [
+        PioneersProduct(
+            row_number=2,
+            name=smaller.supplier_name,
+            code="NP-CAP-A",
+            sale_price=smaller.price,
+        ),
+        PioneersProduct(
+            row_number=3,
+            name=larger.supplier_name,
+            code="NP-CAP-B",
+            sale_price=larger.price,
+        ),
+    ]
+    matched = match_supplier_items(
+        [smaller, larger],
+        products,
+        processor=NewPipeProcessor(),
+        confirmed_sale_currency="rial",
+    )
+    enriched = apply_price_warnings(matched.candidates)
+    assert len(enriched) == 2
+    assert all(candidate.status == "MATCHED" for candidate in enriched)
+    assert all(not candidate.pricing_blockers for candidate in enriched)
+    assert {c.new_price for c in enriched} == {
+        Decimal("7732010"),
+        Decimal("8926940"),
+    }
+    assert all(is_exportable(candidate) is True for candidate in enriched)
+
+
+def test_newpipe_genuine_name_collisions_remain_blocked() -> None:
+    """Collision blocker still fires for identical names with different prices."""
+    from gheymatyar.domain.supplier_item import SupplierPriceItem
+
+    shared_name = "نیوپایپ تبدیل روپیچ توپیچ روپیچ 1*توپیچ 1"
+    left = SupplierPriceItem(
+        supplier_id="newpipe",
+        supplier_code="COLLIDE-A",
+        supplier_name=shared_name,
+        price=Decimal("1000"),
+        raw_values={
+            "currency": "rial",
+            "price_basis": "printed",
+            "review_warnings": [],
+            "pricing_blockers": [],
+        },
+    )
+    right = SupplierPriceItem(
+        supplier_id="newpipe",
+        supplier_code="COLLIDE-B",
+        supplier_name=shared_name,
+        price=Decimal("2000"),
+        raw_values={
+            "currency": "rial",
+            "price_basis": "printed",
+            "review_warnings": [],
+            "pricing_blockers": [],
+        },
     )
     product = PioneersProduct(
         row_number=2,
-        name=smaller.supplier_name,
+        name=shared_name,
         code="NP",
-        sale_price=smaller.price,
+        sale_price=Decimal("1000"),
     )
     matched = match_supplier_items(
-        [smaller, larger], [product], processor=NewPipeProcessor()
+        [left, right], [product], processor=NewPipeProcessor()
     )
     enriched = apply_price_warnings(matched.candidates)
     assert all(candidate.pricing_blockers for candidate in enriched)
     assert all(is_exportable(candidate) is False for candidate in enriched)
+    approved = [
+        row.model_copy(update={"review_decision": ReviewDecision.APPROVE})
+        for row in enriched
+    ]
+    assert all(is_exportable(row) is False for row in approved)
 
 
 def test_abrahan_sections_and_package_quantities(abrahan_result) -> None:

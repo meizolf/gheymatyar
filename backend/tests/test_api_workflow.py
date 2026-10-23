@@ -87,23 +87,30 @@ def test_end_to_end_azin_workflow(
         "ambiguous_count"
     ] == len(payload["candidates"])
 
-    # The Azin list states a Rial amount, but not whether that amount is per metre
-    # or per piece, and this workbook has no unit column. Export stays blocked.
+    # Confirmed printed Rial: no generic listed-basis blocker. Soft suspicious-%
+    # warnings still need APPROVE; only نرخ فروش اصلی may change on export.
     matched = [row for row in payload["candidates"] if row["status"] == "MATCHED"]
     assert matched
-    assert all(row["exportable"] is False for row in matched)
-    assert any(
-        "price basis:" in blocker
-        for row in matched
-        for blocker in row["pricing_blockers"]
-    )
-    review = client.post(
-        f"/api/sessions/{session_id}/candidates/{matched[0]['candidate_id']}/review",
-        json={"decision": "APPROVE"},
-    )
-    assert review.status_code == 400
+    assert all(not row["pricing_blockers"] for row in matched)
+    keep = matched[0]
+    if keep["warnings"]:
+        review = client.post(
+            f"/api/sessions/{session_id}/candidates/{keep['candidate_id']}/review",
+            json={"decision": "APPROVE"},
+        )
+        assert review.status_code == 200, review.text
+        assert review.json()["exportable"] is True
+    for row in payload["candidates"]:
+        if row["candidate_id"] == keep["candidate_id"]:
+            continue
+        excluded = client.post(
+            f"/api/sessions/{session_id}/candidates/{row['candidate_id']}/review",
+            json={"decision": "EXCLUDE"},
+        )
+        assert excluded.status_code == 200, excluded.text
     export_resp = client.post(f"/api/sessions/{session_id}/export")
-    assert export_resp.status_code == 400
+    assert export_resp.status_code == 200, export_resp.text
+    assert export_resp.json()["updated_count"] == 1
     assert pioneers_azin_excel.stat().st_size > 0
 
 

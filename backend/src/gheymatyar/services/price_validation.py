@@ -161,6 +161,9 @@ def _classify_source(unit: str | None, basis: str | None) -> str:
         return "meter"
     if basis == "piece":
         return "piece"
+    # Confirmed printed Rial amount: use as-is (no length/carton multiply).
+    if basis == "printed":
+        return "printed"
     return "unresolved"
 
 
@@ -191,8 +194,9 @@ def normalize_sale_policy(
 ) -> tuple[str | None, str | None]:
     """Accept only an explicit Rial confirmation and an explicit metre or piece basis.
 
-    Any other value, including a blank workbook, stays unconfirmed. Nothing here
-    converts Toman to Rial or metres to a branch.
+    Any other value, including a blank workbook, stays unconfirmed. Toman→Rial
+    conversion belongs in the supplier processor (Decimal), not here. Metres are
+    never converted into a branch unit.
     """
     confirmed_currency = (currency or "").strip().lower()
     confirmed_basis = (basis or "").strip().lower()
@@ -218,6 +222,9 @@ def compatibility_blockers(
     target_kind = _classify_target(target_unit, basis)
     if source_kind == "unresolved":
         blockers.append(SOURCE_BASIS_UNRESOLVED)
+    elif source_kind == "printed":
+        # Reliable price column identified; printed Rial amount is the sale price.
+        pass
     elif target_kind == "unresolved":
         blockers.append(TARGET_BASIS_UNRESOLVED)
     elif source_kind != target_kind:

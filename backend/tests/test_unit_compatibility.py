@@ -55,8 +55,12 @@ def test_real_workbook_without_a_unit_column_stays_unresolved(
     assert all(product.unit is None for product in parsed.products)
     item = _pipe(dina_pdf)
     target = parsed.products[0].model_copy(update={"name": item.supplier_name})
+    # Currency defaults to Rial when unset; metre basis still required for Dina pipes.
     matched = match_supplier_items(
-        [item], [target], processor=DinaPolymerProcessor()
+        [item],
+        [target],
+        processor=DinaPolymerProcessor(),
+        confirmed_sale_currency="rial",
     )
     enriched = apply_price_warnings(matched.candidates)
     candidate = enriched[0]
@@ -64,7 +68,6 @@ def test_real_workbook_without_a_unit_column_stays_unresolved(
     assert any(
         "not on the workbook" in blocker for blocker in candidate.pricing_blockers
     )
-    assert any("sale currency" in blocker for blocker in candidate.pricing_blockers)
     assert is_exportable(candidate) is False
 
 

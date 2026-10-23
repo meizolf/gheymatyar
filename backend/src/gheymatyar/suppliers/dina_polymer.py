@@ -7,8 +7,12 @@ Pipe sections state قیمت هر متر on page 1. Later pipe tables repeat the
 same قیمت / متراژ columns. متراژ (branch or roll length) is package size
 and is never multiplied into the price. Fitting rows are per piece.
 
-The fitting table prints prices under an Excel ``#N/A`` header. Those
-amounts are kept and blocked from automatic export.
+Confirmed rules:
+- Printed prices are Rial; use them directly (no length/package multiply).
+- Fitting table (``اتصالات آبیاری قطره‌ای``): the ``#N/A`` header column
+  holds the Rial price.
+- Drip table (``آبیاری قطره چکان دار``): use the labeled ``قیمت`` column;
+  keep the adjacent ``#N/A`` value separately and never as the sale price.
 
 The PDF does not say whether VAT is included. No tax is added or removed.
 """
@@ -21,6 +25,7 @@ from pathlib import Path
 
 import pymupdf
 
+from gheymatyar.domain.sale_policy import PIONEERS_SALE_CURRENCY
 from gheymatyar.domain.supplier_item import SupplierPriceItem
 from gheymatyar.services.name_normalization import normalize_product_name
 from gheymatyar.suppliers.base import BaseSupplierProcessor, SupplierParseResult
@@ -30,12 +35,6 @@ from gheymatyar.suppliers.textutil import contains_arabic, parse_grouped_amount,
 
 SUPPLIER_KEY = "dina_polymer"
 SUPPLIER_DISPLAY_NAME = "دینا پلیمر"
-
-FITTING_HEADER_WARNING = (
-    "fitting price sits under a #N/A column header; "
-    "the numeric cell was kept as a per-piece Rial price and "
-    "automatic export is blocked until that column is confirmed"
-)
 
 _CODE_RE = re.compile(r"^8\d{8}$")
 
@@ -189,13 +188,13 @@ def _meterage(tokens: list[str]) -> tuple[str | None, str | None, list[str]]:
 
 def _interpret(rest: list[str], mode: str) -> dict[str, str | None]:
     length, form, kept = _meterage(rest)
-    ignored: list[str] = []
+    secondary: list[str] = []
     numbers: list[str] = []
     others: list[str] = []
     for token in kept:
         if re.fullmatch(r"\d{5,}", token):
-            # Unseparated 5+ digit values are the #N/A drip column, not prices.
-            ignored.append(token)
+            # Unseparated 5+ digit values are the drip-table #N/A column.
+            secondary.append(token)
             continue
         if re.fullmatch(r"\d+", token):
             numbers.append(token)
@@ -223,8 +222,28 @@ def _interpret(rest: list[str], mode: str) -> dict[str, str | None]:
         "form": form,
         "pressure": pressure,
         "spacing": spacing,
-        "ignored": ",".join(ignored) or None,
+        "secondary_na": ",".join(secondary) or None,
     }
+
+
+def _price_from_before(before: list[str], mode: str) -> tuple[str | None, str | None]:
+    """Select the sale-price token by table mode, not an arbitrary number.
+
+    - fitting: the sole grouped amount under the ``#N/A`` header column.
+    - drip / pipe / pressure: the labeled ``قیمت`` grouped amount; unseparated
+      drip ``#N/A`` digits are never chosen as the sale price.
+    """
+    grouped = [token for token in before if parse_grouped_amount(token) is not None]
+    if mode == "fitting":
+        if len(grouped) == 1:
+            return grouped[0], "#N/A"
+        return None, "#N/A"
+    if not grouped:
+        return None, "قیمت"
+    if len(grouped) == 1:
+        return grouped[0], "قیمت"
+    # Multiple grouped amounts are ambiguous — refuse to guess.
+    return None, "قیمت"
 
 
 def _parse_group(
@@ -239,9 +258,13 @@ def _parse_group(
     code = texts[index]
     before = texts[:index]
     after = texts[index + 1 :]
-    price_text = next((token for token in before if parse_grouped_amount(token)), None)
+    price_text, price_column = _price_from_before(before, mode)
     if price_text is None:
-        return {"code": code, "price_text": None}
+        return {
+            "code": code,
+            "price_text": None,
+            "price_column": price_column,
+        }
     rest = [token for token in before if token != price_text]
     fields = _interpret(rest, mode)
     name_words = [polish_persian(token) for token in reversed(after) if token.strip()]
@@ -252,6 +275,7 @@ def _parse_group(
         {
             "code": code,
             "price_text": price_text,
+            "price_column": price_column,
             "row_name": " ".join(name_words).strip() or None,
         }
     )
@@ -349,14 +373,15 @@ class DinaPolymerProcessor(BaseSupplierProcessor):
                 "source_path": str(source),
                 "page_count": page_count,
                 "item_count": len(items),
-                "currency": "rial",
-                "pricing_rule": "printed_amount_per_stated_basis",
+                "currency": PIONEERS_SALE_CURRENCY,
+                "pricing_rule": "printed_rial_per_stated_basis",
                 "vat_note": "PDF does not state whether VAT is included",
                 "per_meter_header": per_meter_stated,
             },
         )
 
     def calculate_final_sale_price(self, item: SupplierPriceItem) -> Decimal:
+        # Printed Rial amount; length / package quantity are never multiplied.
         return item.price
 
     def normalize_supplier_name(self, name: str) -> str:
@@ -453,12 +478,15 @@ class DinaPolymerProcessor(BaseSupplierProcessor):
         if not fitting and not category:
             return None, f"page {page_number}: missing category for code {code}; row skipped"
 
-        basis = "piece" if fitting else ("meter" if per_meter or mode in {"pipe", "pressure", "drip"} else "listed")
+        basis = (
+            "piece"
+            if fitting
+            else ("meter" if per_meter or mode in {"pipe", "pressure", "drip"} else "piece")
+        )
         length = parsed.get("length")
         review: list[str] = []
-        if fitting:
-            review.append(FITTING_HEADER_WARNING)
-        elif parsed.get("form") == "شاخه ای" and (
+        # Fitting #N/A column is the confirmed Rial price — not a blocker.
+        if not fitting and parsed.get("form") == "شاخه ای" and (
             not length or not str(length).isdigit() or int(str(length)) > 24
         ):
             review.append(
@@ -466,6 +494,7 @@ class DinaPolymerProcessor(BaseSupplierProcessor):
                 "automatic export is blocked until the dimension is confirmed"
             )
         seen.add(code)
+        secondary = parsed.get("secondary_na")
         return (
             SupplierPriceItem(
                 supplier_id=self.supplier_key,
@@ -474,19 +503,24 @@ class DinaPolymerProcessor(BaseSupplierProcessor):
                 price=price,
                 unit="متر" if basis == "meter" else "عدد",
                 raw_values={
-                    "currency": "rial",
+                    "currency": PIONEERS_SALE_CURRENCY,
+                    "original_currency": PIONEERS_SALE_CURRENCY,
                     "original_price": str(price),
                     "original_price_text": parsed.get("price_text"),
                     "price_basis": basis,
+                    "price_column": parsed.get("price_column"),
                     "tax": "not_stated",
                     "page": page_number,
                     "section": category,
+                    "table_mode": mode,
                     "size": parsed.get("size"),
                     "pressure_bar": parsed.get("pressure"),
                     "drip_spacing_cm": parsed.get("spacing"),
                     "package_length_m": length,
                     "package_form": parsed.get("form"),
-                    "ignored_column": parsed.get("ignored"),
+                    # Drip-table adjacent #N/A value (not the sale price).
+                    "ignored_column": secondary,
+                    "secondary_na_column": secondary,
                     "review_warnings": review,
                     "pricing_blockers": list(review),
                 },
