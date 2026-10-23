@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from decimal import Decimal
 from pathlib import Path
@@ -24,7 +26,10 @@ from gheymatyar.parsers.workbook_format import (
     detect_workbook_format,
     unsupported_format_message,
 )
+from gheymatyar.repositories._session import commit_or_raise
 from gheymatyar.repositories.mapping_repository import MappingRepository
+from gheymatyar.repositories.product_decision_repository import ProductDecisionRepository
+from gheymatyar.repositories.records import ProductMappingRecord, SupplierRecord
 from gheymatyar.repositories.settings_repository import SettingsRepository
 from gheymatyar.repositories.supplier_repository import SupplierRepository
 from gheymatyar.services.matching import (
@@ -33,6 +38,7 @@ from gheymatyar.services.matching import (
     search_pioneers_products,
 )
 from gheymatyar.services.name_normalization import normalize_product_name
+from gheymatyar.services.product_identity import supplier_product_identity
 from gheymatyar.services.pioneers_excel_writer import (
     ExcelUpdateResult,
     update_final_sale_prices,
@@ -47,6 +53,7 @@ from gheymatyar.services.price_validation import (
     to_final_sale_updates,
 )
 from gheymatyar.services.session_store import ProcessingSession, SessionStore
+from gheymatyar.suppliers.errors import UnsupportedSupplierError
 from gheymatyar.suppliers.registry import SupplierProcessorRegistry, get_default_registry
 
 _SAFE_FILENAME_RE = re.compile(r"[^\w.\-()+ \u0600-\u06FF]+", re.UNICODE)
@@ -111,6 +118,78 @@ def _safe_filename(name: str, *, default: str) -> str:
     return cleaned[:180]
 
 
+_EXPORT_FINGERPRINT_KEY = "export_decision_fingerprint"
+# Persisted mapping token for each session-only or manual override, keyed by
+# supplier-product identity. An unrelated ignore must not refresh these.
+_MANUAL_BASIS_KEY = "manual_override_basis"
+_MAPPING_ABSENT = "absent"
+
+
+class _DecisionsChanged(Exception):
+    """SQLite ignore or mapping state changed while a workbook was written."""
+
+
+def workbook_decision_stamp(
+    db_fingerprint: str, candidates: list[UpdateCandidate]
+) -> str:
+    """Hash the SQLite decisions together with the rows this export writes.
+
+    A workbook is fresh only when both match. Stamping the database hash alone
+    would treat a file built from obsolete targets as current.
+    """
+    applied: list[list[object]] = []
+    for candidate in candidates:
+        if is_exportable(candidate):
+            applied.append(
+                [
+                    candidate.row_number,
+                    str(candidate.new_price),
+                    candidate.supplier_code or "",
+                    candidate.pioneers_code or "",
+                ]
+            )
+    applied.sort(key=lambda item: (item[0] is None, item[0], item[2], item[3]))
+    payload = json.dumps(
+        {"decisions": db_fingerprint, "applied": applied},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def decision_fingerprint(db_session: Session, supplier_id: int) -> str:
+    """Hash the supplier decisions that decide which prices an export may write."""
+    ignored = sorted(
+        ProductDecisionRepository(db_session).ignored_identity_keys(supplier_id)
+    )
+    mappings = []
+    for row in MappingRepository(db_session).list_for_supplier(supplier_id):
+        updated = row.updated_at.isoformat() if row.updated_at else ""
+        mappings.append(
+            (
+                row.identity_key,
+                bool(row.legacy_unscoped),
+                row.pioneers_name_normalized,
+                row.pioneers_code or "",
+                updated,
+            )
+        )
+    mappings.sort()
+    payload = json.dumps(
+        {"ignored": ignored, "mappings": mappings},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _download_name(session: ProcessingSession) -> str:
+    if session.pioneers_filename:
+        stem = Path(session.pioneers_filename).stem
+        return f"{stem}_updated.xlsx"
+    return "pioneers_updated.xlsx"
+
+
 def _invalidate_export(session: ProcessingSession) -> None:
     """Drop any previously generated workbook so downloads cannot be stale."""
     if session.output_path is not None:
@@ -127,6 +206,49 @@ def _clear_match_state(session: ProcessingSession) -> None:
     session.matched_count = 0
     session.unmatched_count = 0
     session.ambiguous_count = 0
+    session.ignored_count = 0
+
+
+def _candidate_identity(processor, candidate: UpdateCandidate) -> str:
+    return supplier_product_identity(
+        normalized_name=processor.normalize_supplier_name(candidate.supplier_name),
+        supplier_code=candidate.supplier_code,
+        unit=candidate.source_unit,
+    )
+
+
+def _mapping_basis_token(record: ProductMappingRecord | None) -> str:
+    """Identity of one saved mapping. ``absent`` means no scoped row exists."""
+    if record is None:
+        return _MAPPING_ABSENT
+    return json.dumps(
+        {
+            "code": record.pioneers_code or "",
+            "name": record.pioneers_name_normalized,
+            "legacy": bool(record.legacy_unscoped),
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _as_ignored(candidate: UpdateCandidate) -> UpdateCandidate:
+    if (
+        candidate.status is MatchStatus.IGNORED
+        and candidate.review_decision is ReviewDecision.EXCLUDE
+    ):
+        return candidate
+    return candidate.model_copy(
+        update={
+            "status": MatchStatus.IGNORED,
+            "review_decision": ReviewDecision.EXCLUDE,
+        }
+    )
+
+
+IGNORED_PRODUCT_MESSAGE = (
+    "ignored supplier products must be restored before they can be included or approved"
+)
 
 
 def _revoke_supplier_confirmation(session: ProcessingSession) -> None:
@@ -220,10 +342,7 @@ class ProcessingService:
             session.products = list(parse_result.products)
             session.invalid_rows = list(parse_result.invalid_rows)
             session.duplicate_codes = dict(parse_result.duplicate_codes)
-            session.candidates = []
-            session.matched_count = 0
-            session.unmatched_count = 0
-            session.ambiguous_count = 0
+            _clear_match_state(session)
             _invalidate_export(session)
             return session
 
@@ -386,43 +505,24 @@ class ProcessingService:
 
         processor = self._registry.get(session.supplier_key)
         supplier_row = self._ensure_supplier_row(db_session, processor)
-        mapping_repo = MappingRepository(db_session)
-        saved = [
-            SavedNameMapping(
-                supplier_name_normalized=row.supplier_name_normalized,
-                pioneers_name_raw=row.pioneers_name_raw,
-                pioneers_name_normalized=row.pioneers_name_normalized,
-                pioneers_code=row.pioneers_code,
-            )
-            for row in mapping_repo.list_for_supplier(supplier_row.id)
-        ]
-
-        sale_currency, sale_basis = _stored_sale_policy(db_session)
-        _remember_sale_policy(session, sale_currency, sale_basis)
-        match_result = match_supplier_items(
-            session.supplier_items,
-            session.products,
-            processor=processor,
-            saved_mappings=saved,
-            confirmed_sale_currency=sale_currency,
-            confirmed_sale_basis=sale_basis,
+        ignored = ProductDecisionRepository(db_session).ignored_identity_keys(
+            supplier_row.id
         )
-
-        saved_setting = SettingsRepository(db_session).get(SETTING_THRESHOLD_KEY)
-        threshold = resolve_suspicious_percent_threshold(
-            request_value=suspicious_percent_threshold,
-            saved_value=saved_setting.value if saved_setting else None,
-            default=DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
+        match_result, candidates, threshold = self._match_candidates(
+            session,
+            db_session,
+            processor,
+            supplier_id=supplier_row.id,
+            ignored_identities=ignored,
+            suspicious_percent_threshold=suspicious_percent_threshold,
         )
-        session.candidates = apply_price_warnings(
-            match_result.candidates,
-            suspicious_percent_threshold=threshold,
-            conflicted_row_numbers=session.conflicted_row_numbers,
-        )
+        session.candidates = candidates
         session.matched_count = match_result.matched_count
         session.unmatched_count = match_result.unmatched_count
         session.ambiguous_count = match_result.ambiguous_count
+        session.ignored_count = match_result.ignored_count
         session.metadata["suspicious_percent_threshold"] = str(threshold)
+        session.metadata.pop(_MANUAL_BASIS_KEY, None)
         _invalidate_export(session)
         return session
 
@@ -466,6 +566,8 @@ class ProcessingService:
             if not session.supplier_key:
                 raise ValueError("supplier is not set on this session")
             processor = self._registry.get(session.supplier_key)
+            if self._identity_is_ignored(session, db_session, processor, candidate):
+                raise ValueError(IGNORED_PRODUCT_MESSAGE)
             new_price = candidate.new_price
             if new_price is None:
                 raise ValueError("candidate has no new price")
@@ -507,7 +609,6 @@ class ProcessingService:
                 suggestions=[],
             )
             sale_currency, sale_basis = _stored_sale_policy(db_session)
-            _remember_sale_policy(session, sale_currency, sale_basis)
             updated = apply_sale_compatibility(
                 updated,
                 target_unit=product.unit,
@@ -523,20 +624,140 @@ class ProcessingService:
                 suspicious_percent_threshold=threshold,
                 conflicted_row_numbers=session.conflicted_row_numbers,
             )[0]
-            session.replace_candidate(updated)
-            self._recount(session)
-            _invalidate_export(session)
-
             if save:
                 supplier_row = self._ensure_supplier_row(db_session, processor)
                 MappingRepository(db_session).upsert(
                     supplier_id=supplier_row.id,
                     supplier_name_raw=candidate.supplier_name,
+                    supplier_name_normalized=processor.normalize_supplier_name(
+                        candidate.supplier_name
+                    ),
+                    supplier_code=candidate.supplier_code,
+                    unit=candidate.source_unit,
                     pioneers_name_raw=product.name,
                     pioneers_code=product.code,
                     mapping_type=MappingType.MANUAL,
                 )
+                commit_or_raise(db_session)
+            _remember_sale_policy(session, sale_currency, sale_basis)
+            session.replace_candidate(updated)
+            self._recount(session)
+            self._remember_manual_basis(session, db_session, processor, updated)
+            _invalidate_export(session)
             return updated
+
+    def ignore_candidate(
+        self,
+        session_id: str,
+        db_session: Session,
+        *,
+        candidate_id: str,
+    ) -> UpdateCandidate:
+        """Soft-delete a supplier product. Pioneers rows are not modified."""
+        with self._store.session_lock(session_id):
+            session = self._store.require(session_id)
+            candidate = session.get_candidate(candidate_id)
+            if candidate is None:
+                raise KeyError(candidate_id)
+            processor, supplier_row = self._require_supplier(session, db_session)
+            identity = _candidate_identity(processor, candidate)
+            ProductDecisionRepository(db_session).ignore(
+                supplier_id=supplier_row.id,
+                supplier_name_raw=candidate.supplier_name,
+                supplier_name_normalized=processor.normalize_supplier_name(
+                    candidate.supplier_name
+                ),
+                supplier_code=candidate.supplier_code,
+                unit=candidate.source_unit,
+            )
+            commit_or_raise(db_session)
+            updated = candidate
+            for current in list(session.candidates):
+                if _candidate_identity(processor, current) != identity:
+                    continue
+                marked = _as_ignored(current)
+                session.replace_candidate(marked)
+                if current.candidate_id == candidate_id:
+                    updated = marked
+            self._recount(session)
+            _invalidate_export(session)
+            return updated
+
+    def restore_candidate(
+        self,
+        session_id: str,
+        db_session: Session,
+        *,
+        candidate_id: str,
+    ) -> UpdateCandidate:
+        """Clear a soft-delete and match that product again.
+
+        Other rows keep an explicit exclusion, and an ``APPROVE`` only when
+        they still match the same Pioneers row. The restored product itself is
+        matched from scratch.
+        """
+        with self._store.session_lock(session_id):
+            session = self._store.require(session_id)
+            candidate = session.get_candidate(candidate_id)
+            if candidate is None:
+                raise KeyError(candidate_id)
+            processor, supplier_row = self._require_supplier(session, db_session)
+            identity = _candidate_identity(processor, candidate)
+            ProductDecisionRepository(db_session).restore(
+                supplier_id=supplier_row.id,
+                supplier_name_raw=candidate.supplier_name,
+                supplier_name_normalized=processor.normalize_supplier_name(
+                    candidate.supplier_name
+                ),
+                supplier_code=candidate.supplier_code,
+                unit=candidate.source_unit,
+            )
+            commit_or_raise(db_session)
+            ignored = ProductDecisionRepository(db_session).ignored_identity_keys(
+                supplier_row.id
+            )
+            _match_result, candidates, _threshold = self._match_candidates(
+                session,
+                db_session,
+                processor,
+                supplier_id=supplier_row.id,
+                ignored_identities=ignored,
+                suspicious_percent_threshold=session.metadata.get(
+                    "suspicious_percent_threshold"
+                ),
+            )
+            self._replace_candidates_preserving_reviews(
+                session,
+                processor,
+                candidates,
+                preserve_local_exclude=True,
+                release_identity=identity,
+                require_review_on_target_change=True,
+            )
+            restored = session.get_candidate(candidate_id)
+            if restored is None or _candidate_identity(processor, restored) != identity:
+                # Identity still present, but the previous id was not reused.
+                restored = next(
+                    (
+                        item
+                        for item in session.candidates
+                        if _candidate_identity(processor, item) == identity
+                    ),
+                    None,
+                )
+            if restored is None:
+                raise KeyError(candidate_id)
+            _invalidate_export(session)
+            return restored
+
+    def apply_saved_ignores(
+        self, session_id: str, db_session: Session
+    ) -> ProcessingSession:
+        """Re-apply persistent ignores onto an in-memory session."""
+        with self._store.session_lock(session_id):
+            session = self._store.require(session_id)
+            self._apply_saved_ignores_unlocked(session, db_session)
+            return session
 
     def set_review_decision(
         self,
@@ -544,12 +765,20 @@ class ProcessingService:
         *,
         candidate_id: str,
         decision: ReviewDecision,
+        db_session: Session | None = None,
     ) -> UpdateCandidate:
         with self._store.session_lock(session_id):
             session = self._store.require(session_id)
+            if db_session is not None:
+                self._apply_saved_ignores_unlocked(session, db_session)
             candidate = session.get_candidate(candidate_id)
             if candidate is None:
                 raise KeyError(candidate_id)
+            if (
+                candidate.status is MatchStatus.IGNORED
+                and decision is not ReviewDecision.EXCLUDE
+            ):
+                raise ValueError(IGNORED_PRODUCT_MESSAGE)
             if (
                 candidate.status != MatchStatus.MATCHED
                 and decision != ReviewDecision.EXCLUDE
@@ -605,6 +834,7 @@ class ProcessingService:
                         ),
                         conflicted_row_numbers=current.conflicted_row_numbers,
                     )
+                    self._apply_saved_ignores_unlocked(current, db_session)
                 _invalidate_export(current)
 
     def export_excel(
@@ -612,39 +842,201 @@ class ProcessingService:
     ) -> ExcelUpdateResult:
         with self._store.session_lock(session_id):
             session = self._store.require(session_id)
+            for _ in range(4):
+                try:
+                    return self._export_excel_unlocked(session, db_session)
+                except _DecisionsChanged:
+                    continue
+            raise ValueError("decisions changed during export; retry")
+
+    def read_fresh_workbook(
+        self, session_id: str, db_session: Session
+    ) -> tuple[bytes, str]:
+        """Return export bytes that match the current SQLite decisions.
+
+        A missing workbook stays a not-found result so an in-session review
+        change that deleted the file is not silently rewritten. A file that is
+        still on disk is served only when its decision fingerprint still
+        matches. Otherwise the session is rematched from SQLite and the
+        workbook is rewritten before any bytes are returned.
+        """
+        with self._store.session_lock(session_id):
+            session = self._store.require(session_id)
             if not session.supplier_confirmed:
                 raise ValueError(
                     "Supplier has not been confirmed; confirm the detected supplier first"
                 )
-            if session.pioneers_path is None or not session.pioneers_path.is_file():
-                raise ValueError("Pioneers Excel has not been uploaded")
-            assert session.work_dir is not None
-
-            if db_session is not None:
-                _remember_sale_policy(session, *_stored_sale_policy(db_session))
-
-            # Snapshot decisions under the same lock that review mutations use.
-            guarded = apply_price_warnings(
-                _refresh_sale_compatibility(session),
-                suspicious_percent_threshold=resolve_suspicious_percent_threshold(
-                    request_value=session.metadata.get("suspicious_percent_threshold"),
-                    default=DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
-                ),
-                conflicted_row_numbers=session.conflicted_row_numbers,
+            if session.output_path is None or not session.output_path.is_file():
+                raise FileNotFoundError("export not available; run export first")
+            for _ in range(4):
+                self._reconcile_saved_decisions(session, db_session)
+                current = self._workbook_stamp(session, db_session)
+                recorded = session.metadata.get(_EXPORT_FINGERPRINT_KEY)
+                if (
+                    recorded == current
+                    and session.output_path is not None
+                    and session.output_path.is_file()
+                ):
+                    data = session.output_path.read_bytes()
+                    if self._workbook_stamp(session, db_session) == recorded:
+                        return data, _download_name(session)
+                try:
+                    self._export_excel_unlocked(session, db_session)
+                except _DecisionsChanged:
+                    continue
+                if session.output_path is not None and session.output_path.is_file():
+                    data = session.output_path.read_bytes()
+                    if session.metadata.get(_EXPORT_FINGERPRINT_KEY) == (
+                        self._workbook_stamp(session, db_session)
+                    ):
+                        return data, _download_name(session)
+            raise ValueError(
+                "export changed while it was being prepared; retry download"
             )
-            session.candidates = guarded
 
-            updates = to_final_sale_updates(session.candidates)
-            if not updates:
+    def _decision_fingerprint(
+        self, session: ProcessingSession, db_session: Session
+    ) -> str:
+        if not session.supplier_key:
+            return "none"
+        try:
+            processor = self._registry.get(session.supplier_key)
+        except UnsupportedSupplierError:
+            return "none"
+        supplier = self._find_supplier_row(db_session, processor)
+        if supplier is None:
+            return "none"
+        return decision_fingerprint(db_session, supplier.id)
+
+    def _workbook_stamp(
+        self, session: ProcessingSession, db_session: Session
+    ) -> str:
+        return workbook_decision_stamp(
+            self._decision_fingerprint(session, db_session),
+            session.candidates,
+        )
+
+    def _remember_manual_basis(
+        self,
+        session: ProcessingSession,
+        db_session: Session,
+        processor,
+        candidate: UpdateCandidate,
+    ) -> None:
+        """Record the saved mapping this override was confirmed against.
+
+        Only this product's row is stored. A later ignore of another product
+        does not mark a newer correction of this one as already seen.
+        """
+        identity = _candidate_identity(processor, candidate)
+        supplier = self._find_supplier_row(db_session, processor)
+        record = None
+        if supplier is not None:
+            record = MappingRepository(db_session).get_by_identity(
+                supplier.id, identity
+            )
+        basis = dict(session.metadata.get(_MANUAL_BASIS_KEY) or {})
+        basis[identity] = _mapping_basis_token(record)
+        session.metadata[_MANUAL_BASIS_KEY] = basis
+
+    def _reconcile_saved_decisions(
+        self, session: ProcessingSession, db_session: Session
+    ) -> None:
+        """Retarget candidates from current SQLite mappings and ignores.
+
+        Explicit exclusions stay put. An approval stays only when the Pioneers
+        row is unchanged. A saved correction that moves the target does not
+        keep the previous approval. A manual target stays only when the saved
+        mapping for that same product is unchanged, and a save=false choice is
+        never written to SQLite. An ignore still removes the row from export.
+        """
+        if not session.supplier_key or not session.supplier_items:
+            return
+        processor, supplier_row = self._require_supplier(session, db_session)
+        ignored = ProductDecisionRepository(db_session).ignored_identity_keys(
+            supplier_row.id
+        )
+        basis = dict(session.metadata.get(_MANUAL_BASIS_KEY) or {})
+        repository = MappingRepository(db_session)
+        tokens = {
+            identity: _mapping_basis_token(
+                repository.get_by_identity(supplier_row.id, identity)
+            )
+            for identity in basis
+        }
+        _match_result, candidates, _threshold = self._match_candidates(
+            session,
+            db_session,
+            processor,
+            supplier_id=supplier_row.id,
+            ignored_identities=ignored,
+            suspicious_percent_threshold=session.metadata.get(
+                "suspicious_percent_threshold"
+            ),
+        )
+        self._replace_candidates_preserving_reviews(
+            session,
+            processor,
+            candidates,
+            preserve_local_exclude=True,
+            require_review_on_target_change=True,
+            manual_basis=basis,
+            mapping_tokens=tokens,
+        )
+
+    def _export_excel_unlocked(
+        self, session: ProcessingSession, db_session: Session | None
+    ) -> ExcelUpdateResult:
+        if not session.supplier_confirmed:
+            raise ValueError(
+                "Supplier has not been confirmed; confirm the detected supplier first"
+            )
+        if session.pioneers_path is None or not session.pioneers_path.is_file():
+            raise ValueError("Pioneers Excel has not been uploaded")
+        assert session.work_dir is not None
+
+        if db_session is not None:
+            _remember_sale_policy(session, *_stored_sale_policy(db_session))
+            self._reconcile_saved_decisions(session, db_session)
+            self._apply_saved_ignores_unlocked(session, db_session)
+        fingerprint_before = (
+            self._decision_fingerprint(session, db_session)
+            if db_session is not None
+            else None
+        )
+
+        # Snapshot decisions under the same lock that review mutations use.
+        guarded = apply_price_warnings(
+            _refresh_sale_compatibility(session),
+            suspicious_percent_threshold=resolve_suspicious_percent_threshold(
+                request_value=session.metadata.get("suspicious_percent_threshold"),
+                default=DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
+            ),
+            conflicted_row_numbers=session.conflicted_row_numbers,
+        )
+        session.candidates = guarded
+
+        updates = to_final_sale_updates(session.candidates)
+        if not updates:
+            _invalidate_export(session)
+            raise ValueError("no approved updates available for export")
+
+        output = session.work_dir / "pioneers_updated.xlsx"
+        if output.exists():
+            output.unlink()
+        result = update_final_sale_prices(session.pioneers_path, output, updates)
+        if db_session is not None:
+            fingerprint_after = self._decision_fingerprint(session, db_session)
+            if fingerprint_after != fingerprint_before:
                 _invalidate_export(session)
-                raise ValueError("no approved updates available for export")
-
-            output = session.work_dir / "pioneers_updated.xlsx"
-            if output.exists():
-                output.unlink()
-            result = update_final_sale_prices(session.pioneers_path, output, updates)
-            session.output_path = output
-            return result
+                if output.is_file():
+                    output.unlink()
+                raise _DecisionsChanged()
+            session.metadata[_EXPORT_FINGERPRINT_KEY] = workbook_decision_stamp(
+                fingerprint_after, session.candidates
+            )
+        session.output_path = output
+        return result
 
     def preview_summary(self, session: ProcessingSession) -> dict[str, object]:
         exportable = sum(1 for c in session.candidates if is_exportable(c))
@@ -677,6 +1069,7 @@ class ProcessingService:
             "matched_count": session.matched_count,
             "unmatched_count": session.unmatched_count,
             "ambiguous_count": session.ambiguous_count,
+            "ignored_count": session.ignored_count,
             "warning_count": warned,
             "exportable_count": exportable,
             "parse_warnings": session.parse_warnings,
@@ -685,8 +1078,191 @@ class ProcessingService:
             ),
         }
 
+    def _match_candidates(
+        self,
+        session: ProcessingSession,
+        db_session: Session,
+        processor,
+        *,
+        supplier_id: int,
+        ignored_identities: set[str],
+        suspicious_percent_threshold: str | None,
+    ):
+        saved = [
+            SavedNameMapping(
+                supplier_name_normalized=row.supplier_name_normalized,
+                pioneers_name_raw=row.pioneers_name_raw,
+                pioneers_name_normalized=row.pioneers_name_normalized,
+                pioneers_code=row.pioneers_code,
+                identity_key=row.identity_key,
+                supplier_code=row.supplier_code,
+                unit_normalized=row.unit_normalized,
+                legacy_unscoped=row.legacy_unscoped,
+            )
+            for row in MappingRepository(db_session).list_for_supplier(supplier_id)
+        ]
+        sale_currency, sale_basis = _stored_sale_policy(db_session)
+        _remember_sale_policy(session, sale_currency, sale_basis)
+        match_result = match_supplier_items(
+            session.supplier_items,
+            session.products,
+            processor=processor,
+            saved_mappings=saved,
+            ignored_identities=ignored_identities,
+            confirmed_sale_currency=sale_currency,
+            confirmed_sale_basis=sale_basis,
+        )
+        saved_setting = SettingsRepository(db_session).get(SETTING_THRESHOLD_KEY)
+        threshold = resolve_suspicious_percent_threshold(
+            request_value=suspicious_percent_threshold,
+            saved_value=saved_setting.value if saved_setting else None,
+            default=DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
+        )
+        candidates = apply_price_warnings(
+            match_result.candidates,
+            suspicious_percent_threshold=threshold,
+            conflicted_row_numbers=session.conflicted_row_numbers,
+        )
+        return match_result, candidates, threshold
+
+    def _require_supplier(self, session: ProcessingSession, db_session: Session):
+        if not session.supplier_key:
+            raise ValueError("supplier is not set on this session")
+        processor = self._registry.get(session.supplier_key)
+        return processor, self._ensure_supplier_row(db_session, processor)
+
+    def _identity_is_ignored(
+        self,
+        session: ProcessingSession,
+        db_session: Session,
+        processor,
+        candidate: UpdateCandidate,
+    ) -> bool:
+        supplier = self._find_supplier_row(db_session, processor)
+        if supplier is None:
+            return False
+        identity = _candidate_identity(processor, candidate)
+        return identity in ProductDecisionRepository(db_session).ignored_identity_keys(
+            supplier.id
+        )
+
+    def _apply_saved_ignores_unlocked(
+        self, session: ProcessingSession, db_session: Session
+    ) -> None:
+        if not session.supplier_key or not session.candidates:
+            return
+        try:
+            processor = self._registry.get(session.supplier_key)
+        except UnsupportedSupplierError:
+            return
+        supplier = self._find_supplier_row(db_session, processor)
+        if supplier is None:
+            return
+        ignored = ProductDecisionRepository(db_session).ignored_identity_keys(
+            supplier.id
+        )
+        if not ignored:
+            return
+        changed = False
+        for candidate in list(session.candidates):
+            if _candidate_identity(processor, candidate) not in ignored:
+                continue
+            marked = _as_ignored(candidate)
+            if marked is not candidate:
+                session.replace_candidate(marked)
+                changed = True
+        if changed:
+            self._recount(session)
+            _invalidate_export(session)
+
+    def _replace_candidates_preserving_reviews(
+        self,
+        session: ProcessingSession,
+        processor,
+        new_candidates: list[UpdateCandidate],
+        *,
+        preserve_local_exclude: bool = False,
+        release_identity: str | None = None,
+        require_review_on_target_change: bool = False,
+        manual_basis: dict[str, str] | None = None,
+        mapping_tokens: dict[str, str] | None = None,
+    ) -> None:
+        """Install a fresh match, keeping reviews that still apply."""
+        previous: dict[str, list[UpdateCandidate]] = {}
+        for candidate in session.candidates:
+            previous.setdefault(_candidate_identity(processor, candidate), []).append(
+                candidate
+            )
+        merged: list[UpdateCandidate] = []
+        for new_candidate in new_candidates:
+            pool = previous.get(_candidate_identity(processor, new_candidate), [])
+            old = pool.pop(0) if pool else None
+            if old is None:
+                merged.append(new_candidate)
+                continue
+            decision = new_candidate.review_decision
+            new_identity = _candidate_identity(processor, new_candidate)
+            recorded = None if manual_basis is None else manual_basis.get(new_identity)
+            current_token = (
+                None if mapping_tokens is None else mapping_tokens.get(new_identity)
+            )
+            if (
+                old.match_type is MappingType.MANUAL
+                and new_candidate.status is not MatchStatus.IGNORED
+                and recorded is not None
+                and recorded == current_token
+            ):
+                merged.append(old)
+                continue
+            target_changed = (
+                old.status is MatchStatus.MATCHED
+                and new_candidate.status is MatchStatus.MATCHED
+                and old.row_number != new_candidate.row_number
+            )
+            if (
+                preserve_local_exclude
+                and old.review_decision is ReviewDecision.EXCLUDE
+                and new_candidate.status is not MatchStatus.IGNORED
+                and new_identity != release_identity
+            ):
+                decision = ReviewDecision.EXCLUDE
+            elif target_changed and require_review_on_target_change:
+                # A previous approval does not cover a different Pioneers row.
+                # The exception is a saved correction of a product that was
+                # already approved: that confirmation names the new row, and
+                # the existing approval still covers its price warning.
+                # Any other changed target stays out of the workbook.
+                if (
+                    new_candidate.match_type is MappingType.SAVED_MAPPING
+                    and old.review_decision is ReviewDecision.APPROVE
+                    and not new_candidate.pricing_blockers
+                    and IDENTITY_CONFLICT_WARNING not in new_candidate.warnings
+                ):
+                    decision = ReviewDecision.APPROVE
+                else:
+                    decision = ReviewDecision.EXCLUDE
+            elif (
+                old.review_decision is ReviewDecision.APPROVE
+                and old.status is MatchStatus.MATCHED
+                and new_candidate.status is MatchStatus.MATCHED
+                and new_candidate.row_number == old.row_number
+                and not new_candidate.pricing_blockers
+                and IDENTITY_CONFLICT_WARNING not in new_candidate.warnings
+            ):
+                decision = ReviewDecision.APPROVE
+            merged.append(
+                new_candidate.model_copy(
+                    update={
+                        "candidate_id": old.candidate_id,
+                        "review_decision": decision,
+                    }
+                )
+            )
+        session.candidates = merged
+        self._recount(session)
+
     @staticmethod
-    def _ensure_supplier_row(db_session: Session, processor) -> object:
+    def _find_supplier_row(db_session: Session, processor) -> SupplierRecord | None:
         repo = SupplierRepository(db_session)
         existing = repo.get_by_name(processor.display_name)
         if existing is not None:
@@ -694,7 +1270,14 @@ class ProcessingService:
         for row in repo.list_all():
             if row.parser_type == processor.supplier_key:
                 return row
-        return repo.create(
+        return None
+
+    @staticmethod
+    def _ensure_supplier_row(db_session: Session, processor) -> SupplierRecord:
+        existing = ProcessingService._find_supplier_row(db_session, processor)
+        if existing is not None:
+            return existing
+        return SupplierRepository(db_session).create(
             name=processor.display_name, parser_type=processor.supplier_key
         )
 
@@ -708,6 +1291,9 @@ class ProcessingService:
         )
         session.ambiguous_count = sum(
             1 for c in session.candidates if c.status == MatchStatus.AMBIGUOUS
+        )
+        session.ignored_count = sum(
+            1 for c in session.candidates if c.status == MatchStatus.IGNORED
         )
 
 

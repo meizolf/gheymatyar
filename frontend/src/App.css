@@ -374,6 +374,17 @@
   align-items: stretch;
 }
 
+.row-actions.inline {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.tabs button .tab-count {
+  font-weight: 500;
+  opacity: 0.85;
+}
+
 .warn-list {
   margin: 0;
   padding-inline-start: 1rem;

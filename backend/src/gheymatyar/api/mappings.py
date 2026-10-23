@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from gheymatyar.api.deps import get_db_session
@@ -12,8 +13,9 @@ from gheymatyar.api.schemas import (
     MappingUpdateRequest,
 )
 from gheymatyar.domain.enums import MappingType
+from gheymatyar.repositories._session import commit_or_raise
 from gheymatyar.repositories.exceptions import MappingNotFoundError
-from gheymatyar.repositories.mapping_repository import MappingRepository
+from gheymatyar.repositories.mapping_repository import UNSET, MappingRepository
 from gheymatyar.repositories.records import ProductMappingRecord, SupplierRecord
 from gheymatyar.repositories.supplier_repository import SupplierRepository
 from gheymatyar.services.name_normalization import normalize_product_name
@@ -49,6 +51,9 @@ def _to_response(record: ProductMappingRecord, supplier_key: str) -> MappingResp
         pioneers_name_raw=record.pioneers_name_raw,
         pioneers_name_normalized=record.pioneers_name_normalized,
         pioneers_code=record.pioneers_code,
+        supplier_code=record.supplier_code,
+        unit_normalized=record.unit_normalized,
+        legacy_unscoped=record.legacy_unscoped,
         mapping_type=record.mapping_type,
         created_at=record.created_at.isoformat(),
         updated_at=record.updated_at.isoformat(),
@@ -86,19 +91,25 @@ def update_mapping(
     existing = repo.get_by_id(mapping_id)
     if existing is None or existing.supplier_id != supplier.id:
         raise HTTPException(status_code=404, detail="mapping not found")
+    pioneers_code = (
+        body.pioneers_code if "pioneers_code" in body.model_fields_set else UNSET
+    )
     try:
         updated = repo.update(
             supplier_id=supplier.id,
-            supplier_name_normalized=existing.supplier_name_normalized,
+            identity_key=existing.identity_key,
             pioneers_name_raw=body.pioneers_name_raw,
-            pioneers_code=body.pioneers_code,
+            pioneers_code=pioneers_code,
             pioneers_name_normalized=normalize_product_name(body.pioneers_name_raw),
             mapping_type=MappingType.MANUAL,
         )
+        commit_or_raise(db)
     except MappingNotFoundError as exc:
         raise HTTPException(status_code=404, detail="mapping not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=500, detail="could not save the decision") from exc
     return _to_response(updated, supplier_key)
 
 
@@ -118,5 +129,8 @@ def delete_mapping(
         raise HTTPException(status_code=404, detail="mapping not found")
     try:
         repo.delete(mapping_id)
+        commit_or_raise(db)
     except MappingNotFoundError as exc:
         raise HTTPException(status_code=404, detail="mapping not found") from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=500, detail="could not save the decision") from exc

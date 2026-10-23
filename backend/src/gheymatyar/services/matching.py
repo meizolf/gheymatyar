@@ -13,6 +13,7 @@ from gheymatyar.domain.supplier_item import SupplierPriceItem
 from gheymatyar.domain.update_candidate import UpdateCandidate
 from gheymatyar.services.name_normalization import name_similarity, normalize_product_name
 from gheymatyar.services.price_validation import apply_sale_compatibility
+from gheymatyar.services.product_identity import supplier_product_identity
 from gheymatyar.suppliers.base import BaseSupplierProcessor
 
 
@@ -24,6 +25,10 @@ class SavedNameMapping:
     pioneers_name_raw: str
     pioneers_name_normalized: str
     pioneers_code: str | None = None
+    identity_key: str | None = None
+    supplier_code: str | None = None
+    unit_normalized: str | None = None
+    legacy_unscoped: bool = False
 
 
 @dataclass
@@ -32,6 +37,22 @@ class MatchResult:
     matched_count: int = 0
     unmatched_count: int = 0
     ambiguous_count: int = 0
+    ignored_count: int = 0
+
+
+# A saved mapping whose Pioneers target is gone or no longer unique must not
+# fall through to a different automatic match.
+SAVED_TARGET_UNRESOLVED_WARNING = (
+    "saved Pioneers mapping no longer identifies a single product in the "
+    "current workbook; remap before this product can be included"
+)
+
+# A name-only mapping saved before variants were stored does not record which
+# code or unit it belonged to. One later upload cannot prove it is that variant.
+LEGACY_VARIANT_AMBIGUOUS_WARNING = (
+    "saved mapping has no supplier code or unit, so it cannot be applied "
+    "to a specific variant; confirm this code and unit before it can be included"
+)
 
 
 def _index_by_normalized_name(
@@ -168,12 +189,26 @@ def _price_fields(
     return absolute, new_price, percentage
 
 
+def _saved_identity(mapping: SavedNameMapping) -> str | None:
+    """Return the variant key for a scoped mapping.
+
+    ``legacy_unscoped`` rows have no known code or unit. They are not given a
+    variant key, even when this upload contains only one item with the name.
+    """
+    if mapping.legacy_unscoped:
+        return None
+    if mapping.identity_key:
+        return mapping.identity_key
+    return None
+
+
 def match_supplier_items(
     items: Sequence[SupplierPriceItem],
     products: Sequence[PioneersProduct],
     *,
     processor: BaseSupplierProcessor,
     saved_mappings: Iterable[SavedNameMapping] = (),
+    ignored_identities: Iterable[str] = (),
     suggestion_pool_limit: int = 8,
     confirmed_sale_currency: str | None = None,
     confirmed_sale_basis: str | None = None,
@@ -181,9 +216,16 @@ def match_supplier_items(
     """Match supplier items to Pioneers products by name.
 
     Priority:
-    1. Saved supplier-specific mapping (verified against current workbook)
-    2. Unique exact normalized-name match
-    3. Similar-name suggestions → AMBIGUOUS / UNMATCHED (never auto-confirmed)
+    1. Persistent ignore (soft-delete) — never auto-matched or exported
+    2. Saved mapping for this variant (name, supplier code, and unit)
+    3. Unique exact normalized-name match
+    4. Similar-name suggestions → AMBIGUOUS / UNMATCHED (never auto-confirmed)
+
+    A saved mapping that no longer identifies one current Pioneers product is
+    left unmatched for remapping. It does not fall through to another product.
+    A legacy name-only mapping does not know the original code or unit, so it
+    is never applied automatically and does not fall through to an automatic
+    match. Each variant has to be confirmed on its own.
     """
     by_name = _index_by_normalized_name(products)
     by_code: dict[str, list[PioneersProduct]] = {}
@@ -191,9 +233,27 @@ def match_supplier_items(
         if product.code:
             by_code.setdefault(product.code, []).append(product)
 
-    saved_by_supplier_name = {
-        m.supplier_name_normalized: m for m in saved_mappings
-    }
+    scoped: dict[str, SavedNameMapping] = {}
+    legacy_by_name: dict[str, list[SavedNameMapping]] = {}
+    name_only: dict[str, list[SavedNameMapping]] = {}
+    for mapping in saved_mappings:
+        if mapping.legacy_unscoped:
+            legacy_by_name.setdefault(mapping.supplier_name_normalized, []).append(
+                mapping
+            )
+            continue
+        identity_key = _saved_identity(mapping)
+        if identity_key:
+            scoped[identity_key] = mapping
+        else:
+            # In-memory name mappings that predate the variant key. A persisted
+            # legacy row is legacy_unscoped and is not handled here.
+            name_only.setdefault(mapping.supplier_name_normalized, []).append(mapping)
+    name_counts: dict[str, int] = {}
+    for item in items:
+        normalized = processor.normalize_supplier_name(item.supplier_name)
+        name_counts[normalized] = name_counts.get(normalized, 0) + 1
+    ignored = {key for key in ignored_identities if key}
     collisions = _colliding_names(items, processor)
 
     result = MatchResult()
@@ -206,9 +266,121 @@ def match_supplier_items(
         extras = [NAME_COLLISION_BLOCKER] if supplier_name in collisions else []
         blockers = _hard_blockers(item, extras)
         provenance = _provenance(item, blockers)
+        identity = supplier_product_identity(
+            normalized_name=supplier_name,
+            supplier_code=item.supplier_code,
+            unit=item.unit,
+        )
+        if identity in ignored:
+            result.candidates.append(
+                UpdateCandidate(
+                    candidate_id=candidate_id,
+                    row_number=None,
+                    pioneers_code=None,
+                    pioneers_name=None,
+                    supplier_code=item.supplier_code,
+                    supplier_name=raw_supplier_name,
+                    old_price=None,
+                    new_price=new_price,
+                    absolute_change=None,
+                    percentage_change=None,
+                    match_type=None,
+                    status=MatchStatus.IGNORED,
+                    review_decision=ReviewDecision.EXCLUDE,
+                    warnings=list(blockers),
+                    **provenance,
+                )
+            )
+            result.ignored_count += 1
+            continue
 
-        # 1) Saved mapping
-        saved = saved_by_supplier_name.get(supplier_name)
+        # 1) Saved mapping — ahead of exact and fuzzy matches.
+        saved = scoped.get(identity)
+        legacy_hits = legacy_by_name.get(supplier_name, [])
+        if saved is None and legacy_hits:
+            suggestions: list[dict[str, object]] = []
+            seen_rows: set[int] = set()
+            for legacy in legacy_hits:
+                _legacy_status, extra = _remap_suggestions(
+                    legacy,
+                    by_name,
+                    by_code,
+                    raw_supplier_name,
+                    products,
+                    suggestion_pool_limit,
+                )
+                for suggestion in extra:
+                    row_number = suggestion.get("row_number")
+                    if isinstance(row_number, int) and row_number not in seen_rows:
+                        seen_rows.add(row_number)
+                        suggestions.append(suggestion)
+            result.candidates.append(
+                UpdateCandidate(
+                    candidate_id=candidate_id,
+                    row_number=None,
+                    pioneers_code=None,
+                    pioneers_name=None,
+                    supplier_code=item.supplier_code,
+                    supplier_name=raw_supplier_name,
+                    old_price=None,
+                    new_price=new_price,
+                    absolute_change=None,
+                    percentage_change=None,
+                    match_type=None,
+                    status=MatchStatus.AMBIGUOUS,
+                    review_decision=ReviewDecision.EXCLUDE,
+                    warnings=[LEGACY_VARIANT_AMBIGUOUS_WARNING, *blockers],
+                    suggestions=suggestions[:suggestion_pool_limit],
+                    **provenance,
+                )
+            )
+            result.ambiguous_count += 1
+            continue
+        if saved is None:
+            name_hits = name_only.get(supplier_name, [])
+            if len(name_hits) == 1 and name_counts.get(supplier_name, 0) == 1:
+                saved = name_hits[0]
+            elif name_hits:
+                saved = name_hits[0]
+                resolved_name = _resolve_saved_mapping(saved, by_name, by_code)
+                status = (
+                    MatchStatus.AMBIGUOUS
+                    if resolved_name is not None
+                    else MatchStatus.UNMATCHED
+                )
+                _status, suggestions = _remap_suggestions(
+                    saved,
+                    by_name,
+                    by_code,
+                    raw_supplier_name,
+                    products,
+                    suggestion_pool_limit,
+                )
+                result.candidates.append(
+                    UpdateCandidate(
+                        candidate_id=candidate_id,
+                        row_number=None,
+                        pioneers_code=None,
+                        pioneers_name=None,
+                        supplier_code=item.supplier_code,
+                        supplier_name=raw_supplier_name,
+                        old_price=None,
+                        new_price=new_price,
+                        absolute_change=None,
+                        percentage_change=None,
+                        match_type=None,
+                        status=status,
+                        review_decision=ReviewDecision.EXCLUDE,
+                        warnings=[LEGACY_VARIANT_AMBIGUOUS_WARNING, *blockers],
+                        suggestions=suggestions,
+                        **provenance,
+                    )
+                )
+                if status is MatchStatus.AMBIGUOUS:
+                    result.ambiguous_count += 1
+                else:
+                    result.unmatched_count += 1
+                continue
         if saved is not None:
             resolved = _resolve_saved_mapping(saved, by_name, by_code)
             if resolved is not None:
@@ -241,7 +413,39 @@ def match_supplier_items(
                 )
                 result.matched_count += 1
                 continue
-            # Saved mapping no longer resolves uniquely — fall through.
+            status, suggestions = _remap_suggestions(
+                saved,
+                by_name,
+                by_code,
+                raw_supplier_name,
+                products,
+                suggestion_pool_limit,
+            )
+            result.candidates.append(
+                UpdateCandidate(
+                    candidate_id=candidate_id,
+                    row_number=None,
+                    pioneers_code=None,
+                    pioneers_name=None,
+                    supplier_code=item.supplier_code,
+                    supplier_name=raw_supplier_name,
+                    old_price=None,
+                    new_price=new_price,
+                    absolute_change=None,
+                    percentage_change=None,
+                    match_type=MappingType.SAVED_MAPPING,
+                    status=status,
+                    review_decision=ReviewDecision.EXCLUDE,
+                    warnings=[SAVED_TARGET_UNRESOLVED_WARNING, *blockers],
+                    suggestions=suggestions,
+                    **provenance,
+                )
+            )
+            if status is MatchStatus.AMBIGUOUS:
+                result.ambiguous_count += 1
+            else:
+                result.unmatched_count += 1
+            continue
 
         # 2) Exact normalized name
         exact_hits = by_name.get(supplier_name, [])
@@ -345,6 +549,51 @@ def match_supplier_items(
             result.unmatched_count += 1
 
     return result
+
+
+def _suggestion_from_product(
+    product: PioneersProduct, *, score: float
+) -> dict[str, object]:
+    return {
+        "row_number": product.row_number,
+        "pioneers_code": product.code,
+        "pioneers_name": product.name,
+        "sale_price": str(product.sale_price) if product.sale_price is not None else None,
+        "score": score,
+    }
+
+
+def _remap_suggestions(
+    saved: SavedNameMapping,
+    by_name: dict[str, list[PioneersProduct]],
+    by_code: dict[str, list[PioneersProduct]],
+    supplier_name: str,
+    products: Sequence[PioneersProduct],
+    limit: int,
+) -> tuple[MatchStatus, list[dict[str, object]]]:
+    """Suggestions for a saved mapping that must be confirmed again.
+
+    Nothing here is selected automatically.
+    """
+    suggestions: list[dict[str, object]] = []
+    seen_rows: set[int] = set()
+
+    def add(product: PioneersProduct, score: float) -> None:
+        if product.row_number in seen_rows or len(suggestions) >= limit:
+            return
+        seen_rows.add(product.row_number)
+        suggestions.append(_suggestion_from_product(product, score=score))
+
+    if saved.pioneers_code:
+        for product in by_code.get(saved.pioneers_code, []):
+            add(product, 1.0)
+    for product in by_name.get(saved.pioneers_name_normalized, []):
+        add(product, 1.0)
+    if not suggestions:
+        for payload in _suggestion_payloads(supplier_name, products, limit=limit):
+            suggestions.append(payload)
+    status = MatchStatus.AMBIGUOUS if suggestions else MatchStatus.UNMATCHED
+    return status, suggestions
 
 
 def _resolve_saved_mapping(

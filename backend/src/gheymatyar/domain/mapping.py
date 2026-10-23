@@ -11,7 +11,7 @@ from gheymatyar.domain.parsing import normalize_optional_str, require_non_empty_
 
 
 class ProductMapping(BaseModel):
-    """Confirmed link between a supplier product name and a Pioneers product."""
+    """Confirmed link between one supplier variant and a Pioneers product."""
 
     model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
 
@@ -21,6 +21,9 @@ class ProductMapping(BaseModel):
     pioneers_name_raw: str
     pioneers_name_normalized: str
     pioneers_code: str | None = None
+    supplier_code: str | None = None
+    unit_normalized: str | None = None
+    legacy_unscoped: bool = False
     mapping_type: MappingType = MappingType.MANUAL
 
     @field_validator(

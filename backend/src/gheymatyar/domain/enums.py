@@ -21,6 +21,8 @@ class MatchStatus(str, Enum):
     MATCHED = "MATCHED"
     UNMATCHED = "UNMATCHED"
     AMBIGUOUS = "AMBIGUOUS"
+    # Soft-deleted supplier product. Excluded from review, preview, and export.
+    IGNORED = "IGNORED"
 
 
 class ReviewDecision(str, Enum):

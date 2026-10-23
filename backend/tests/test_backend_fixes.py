@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import sqlite3
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
@@ -203,7 +204,10 @@ def test_legacy_code_mapping_schema_migrates_safely(tmp_path: Path) -> None:
     assert "product_mappings" in tables
     new_cols = {c["name"] for c in inspector.get_columns("product_mappings")}
     assert "supplier_name_normalized" in new_cols
-    assert "supplier_code" not in new_cols
+    assert "identity_key" in new_cols
+    assert "legacy_unscoped" in new_cols
+    # Live table stores the variant code. The archived code-key schema is separate.
+    assert "supplier_code" in new_cols
 
     with engine.connect() as conn:
         legacy_count = conn.execute(
@@ -241,6 +245,210 @@ def test_legacy_code_mapping_schema_migrates_safely(tmp_path: Path) -> None:
     assert svc.get_session(session.session_id).matched_count == 1
     engine.dispose()
     db.engine.dispose()
+
+
+def test_name_only_mappings_migrate_as_legacy_unscoped(tmp_path: Path) -> None:
+    path = tmp_path / "names.db"
+    engine = create_engine(f"sqlite:///{path}")
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE suppliers (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL UNIQUE,
+                    parser_type VARCHAR(128) NOT NULL,
+                    created_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE product_mappings (
+                    id INTEGER PRIMARY KEY,
+                    supplier_id INTEGER NOT NULL,
+                    supplier_name_raw TEXT NOT NULL,
+                    supplier_name_normalized VARCHAR(512) NOT NULL,
+                    pioneers_name_raw TEXT NOT NULL,
+                    pioneers_name_normalized VARCHAR(512) NOT NULL,
+                    pioneers_code VARCHAR(255),
+                    mapping_type VARCHAR(32) NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    UNIQUE (supplier_id, supplier_name_normalized)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO suppliers (id, name, parser_type, created_at) "
+                "VALUES (1, 'آذین لوله', 'azin_pipe', '2026-01-01')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO product_mappings ("
+                "id, supplier_id, supplier_name_raw, supplier_name_normalized, "
+                "pioneers_name_raw, pioneers_name_normalized, pioneers_code, "
+                "mapping_type, created_at, updated_at) "
+                "VALUES (7, 1, 'کالای مشترک 20', 'کالای مشترک 20', 'هدف', 'هدف', "
+                "'100', 'MANUAL', '2026-01-01', '2026-01-01')"
+            )
+        )
+
+    notes = migrate_schema(engine)
+    assert any("legacy_unscoped" in note for note in notes)
+    Database(f"sqlite:///{path}").create_tables()
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT id, pioneers_code, pioneers_name_raw, legacy_unscoped, "
+                "supplier_code, identity_key FROM product_mappings"
+            )
+        ).one()
+    assert row.id == 7
+    assert row.pioneers_code == "100"
+    assert row.pioneers_name_raw == "هدف"
+    assert row.legacy_unscoped in (1, True)
+    assert row.supplier_code is None
+    assert row.identity_key == "کالای مشترک 20\x1f\x1f"
+    assert migrate_schema(engine) == []
+    engine.dispose()
+
+
+def test_failed_mapping_copy_rolls_back_and_reopens(
+    tmp_path: Path,
+) -> None:
+    from sqlalchemy import event
+    from sqlalchemy.exc import OperationalError
+
+    path = tmp_path / "legacy-upgrade.db"
+    with sqlite3.connect(path) as db:
+        db.executescript(
+            """
+            CREATE TABLE suppliers (
+                id INTEGER PRIMARY KEY,
+                name VARCHAR(255) NOT NULL UNIQUE,
+                parser_type VARCHAR(128) NOT NULL,
+                created_at DATETIME NOT NULL
+            );
+            CREATE TABLE product_mappings (
+                id INTEGER PRIMARY KEY,
+                supplier_id INTEGER NOT NULL,
+                supplier_name_raw TEXT NOT NULL,
+                supplier_name_normalized VARCHAR(512) NOT NULL,
+                pioneers_name_raw TEXT NOT NULL,
+                pioneers_name_normalized VARCHAR(512) NOT NULL,
+                pioneers_code VARCHAR(255),
+                mapping_type VARCHAR(32) NOT NULL,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                UNIQUE (supplier_id, supplier_name_normalized)
+            );
+            INSERT INTO suppliers VALUES (
+                1, 'dina', 'dina_polymer', '2026-01-01'
+            );
+            INSERT INTO product_mappings VALUES (
+                7, 1, 'source', 'source', 'target', 'target', '100',
+                'MANUAL', '2026-01-01', '2026-01-01'
+            );
+            """
+        )
+    database = Database(f"sqlite:///{path}")
+
+    def fail_copy(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().startswith("INSERT INTO product_mappings"):
+            raise OperationalError(
+                statement, parameters, Exception("injected copy failure")
+            )
+
+    event.listen(database.engine, "before_cursor_execute", fail_copy)
+    with pytest.raises(OperationalError):
+        database.create_tables()
+    event.remove(database.engine, "before_cursor_execute", fail_copy)
+    database.engine.dispose()
+
+    reopened = Database(f"sqlite:///{path}")
+    reopened.create_tables()
+    with sqlite3.connect(path) as db:
+        tables = {
+            row[0]
+            for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        assert "product_mappings__pre_identity" not in tables
+        active = db.execute(
+            "SELECT pioneers_code, legacy_unscoped FROM product_mappings"
+        ).fetchone()
+    assert active[0] == "100"
+    assert active[1] in (1, True)
+    reopened.engine.dispose()
+
+
+def test_stranded_mapping_upgrade_is_recovered(tmp_path: Path) -> None:
+    path = tmp_path / "stranded.db"
+    with sqlite3.connect(path) as db:
+        db.executescript(
+            """
+            CREATE TABLE suppliers (
+                id INTEGER PRIMARY KEY,
+                name VARCHAR(255) NOT NULL UNIQUE,
+                parser_type VARCHAR(128) NOT NULL,
+                created_at DATETIME NOT NULL
+            );
+            CREATE TABLE product_mappings__pre_identity (
+                id INTEGER PRIMARY KEY,
+                supplier_id INTEGER NOT NULL,
+                supplier_name_raw TEXT NOT NULL,
+                supplier_name_normalized VARCHAR(512) NOT NULL,
+                pioneers_name_raw TEXT NOT NULL,
+                pioneers_name_normalized VARCHAR(512) NOT NULL,
+                pioneers_code VARCHAR(255),
+                mapping_type VARCHAR(32) NOT NULL,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            );
+            CREATE TABLE product_mappings (
+                id INTEGER PRIMARY KEY,
+                supplier_id INTEGER NOT NULL,
+                identity_key TEXT NOT NULL,
+                supplier_name_raw TEXT NOT NULL,
+                supplier_name_normalized VARCHAR(512) NOT NULL,
+                supplier_code VARCHAR(255),
+                unit_normalized VARCHAR(255),
+                legacy_unscoped BOOLEAN NOT NULL DEFAULT 0,
+                pioneers_name_raw TEXT NOT NULL,
+                pioneers_name_normalized VARCHAR(512) NOT NULL,
+                pioneers_code VARCHAR(255),
+                mapping_type VARCHAR(32) NOT NULL,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            );
+            INSERT INTO suppliers VALUES (1, 'dina', 'dina_polymer', '2026-01-01');
+            INSERT INTO product_mappings__pre_identity VALUES (
+                7, 1, 'source', 'source', 'target', 'target', '100',
+                'MANUAL', '2026-01-01', '2026-01-01'
+            );
+            """
+        )
+    database = Database(f"sqlite:///{path}")
+    database.create_tables()
+    with sqlite3.connect(path) as db:
+        tables = {
+            row[0]
+            for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        assert "product_mappings__pre_identity" not in tables
+        row = db.execute(
+            "SELECT id, pioneers_code, legacy_unscoped FROM product_mappings"
+        ).fetchone()
+    assert row[0] == 7
+    assert row[1] == "100"
+    assert row[2] in (1, True)
+    database.engine.dispose()
 
 
 def test_unrecognized_mapping_schema_is_not_dropped(tmp_path: Path) -> None:

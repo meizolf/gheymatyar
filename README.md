@@ -5,7 +5,7 @@ Excel exports from supplier PDF price lists.
 
 - **Backend:** Python + FastAPI — multi-supplier-ready workflow
 - **Frontend:** React + Vite — Persian RTL four-step wizard
-- **Persistence:** SQLite for suppliers, confirmed name mappings, settings
+- **Persistence:** SQLite for suppliers, confirmed name mappings, ignored products, settings
 - **Delivery:** Same-origin localhost app; Windows packaging scripts included
 
 ## Repository layout
@@ -86,7 +86,7 @@ See [docs/windows_packaging.md](docs/windows_packaging.md) for the full guide.
 - **Build:** Windows only — local `scripts/windows/build_installer.ps1` or GitHub Actions
   workflow **Windows Offline Installer** (`.github/workflows/windows-installer.yml`)
 - **Download from CI:** Actions → workflow run → Artifacts → **`GheymatYarSetup`**
-- **Data:** mappings survive upgrades in `%USERPROFILE%\.gheymatyar\`
+- **Data:** mappings and ignored products survive upgrades in `%USERPROFILE%\.gheymatyar\`
 
 macOS cannot produce the Windows EXE; use the Actions artifact or a Windows build host.
 
@@ -130,6 +130,8 @@ See [docs/adding_a_supplier.md](docs/adding_a_supplier.md).
 | `GET` | `/api/sessions/{id}/preview` | Matched price-change preview |
 | `GET` | `/api/sessions/{id}/pioneers-products/search?q=` | Search Pioneers products |
 | `POST` | `/api/sessions/{id}/candidates/{cid}/confirm-mapping` | Manual match + save mapping |
+| `POST` | `/api/sessions/{id}/candidates/{cid}/ignore` | Soft-delete (ignore) a supplier product |
+| `POST` | `/api/sessions/{id}/candidates/{cid}/restore` | Restore an ignored supplier product |
 | `POST` | `/api/sessions/{id}/candidates/{cid}/review` | `INCLUDE` / `EXCLUDE` / `APPROVE` |
 | `POST` | `/api/sessions/{id}/export` | Generate updated Excel |
 | `GET` | `/api/sessions/{id}/download` | Download generated Excel |
@@ -139,6 +141,8 @@ See [docs/adding_a_supplier.md](docs/adding_a_supplier.md).
 - Original Excel is never overwritten
 - Only `نرخ فروش اصلی` is modified
 - Fuzzy name matches are never auto-confirmed
+- A saved mapping wins over an exact name and is stored per supplier variant (normalized name, supplier code, and unit). Mappings saved before variants were distinguished are kept, but they are not applied automatically: the original code and unit are unknown, so each variant must be confirmed. If the Pioneers product is missing or no longer unique, the row stays unmatched until the user maps it again. Export and download recheck saved decisions and do not update a product from an obsolete target or a deletion made in another session
+- Deleting a product on the matching page is a persistent ignore for that supplier and product identity (normalized name, supplier code, and unit). It does not remove the PDF row or any Pioneers product, and ignored rows are excluded from price review and Excel export. A later list that changes the code or unit is a different product and does not reuse the decision. Decisions are never shared across suppliers
 - Suspicious price changes require explicit `APPROVE`
 - Supplier auto-detection is a suggestion only; prices are never parsed or matched until the user confirms the company
 - Export is all-or-nothing validation before write

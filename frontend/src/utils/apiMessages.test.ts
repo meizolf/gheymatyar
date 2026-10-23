@@ -67,6 +67,25 @@ describe('translateApiDetail', () => {
     ).toMatch(/توکن کنترل/)
   })
 
+  it('translates persistent decision errors', () => {
+    expect(
+      translateApiDetail(
+        'ignored supplier products must be restored before they can be included or approved',
+      ),
+    ).toMatch(/بازگردانی/)
+    expect(
+      translateApiDetail(
+        'saved Pioneers mapping no longer identifies a single product in the current workbook; remap before this product can be included',
+      ),
+    ).toMatch(/نگاشت/)
+    expect(
+      translateApiDetail(
+        'saved mapping has no supplier code or unit, so it cannot be applied to a specific variant; confirm this code and unit before it can be included',
+      ),
+    ).toMatch(/جداگانه/)
+    expect(translateApiDetail('could not save the decision')).toMatch(/حفظ شده/)
+  })
+
   it('passes through unknown details', () => {
     expect(translateApiDetail('weird custom error')).toBe('weird custom error')
   })

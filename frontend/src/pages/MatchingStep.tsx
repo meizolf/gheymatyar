@@ -20,13 +20,30 @@ import { invalidateSessionData, sessionQueryKeys } from '../workflow/queryKeys'
 import { enqueueSessionOp } from '../workflow/sessionQueue'
 import { useWorkflow } from '../workflow/WorkflowContext'
 
-type StatusFilter = 'ALL' | 'MATCHED' | 'UNMATCHED' | 'AMBIGUOUS'
+type StatusFilter = 'ALL' | 'MATCHED' | 'UNMATCHED' | 'AMBIGUOUS' | 'IGNORED'
+
+const SAVED_TARGET_WARNING =
+  /saved Pioneers mapping no longer identifies a single product/i
 
 function statusTone(status: string): 'ok' | 'warn' | 'danger' | 'neutral' {
   if (status === 'MATCHED') return 'ok'
   if (status === 'AMBIGUOUS') return 'warn'
   if (status === 'UNMATCHED') return 'danger'
   return 'neutral'
+}
+
+function countByStatus(candidates: Candidate[]) {
+  let matched = 0
+  let unmatched = 0
+  let ambiguous = 0
+  let ignored = 0
+  for (const candidate of candidates) {
+    if (candidate.status === 'MATCHED') matched += 1
+    else if (candidate.status === 'UNMATCHED') unmatched += 1
+    else if (candidate.status === 'AMBIGUOUS') ambiguous += 1
+    else if (candidate.status === 'IGNORED') ignored += 1
+  }
+  return { matched, unmatched, ambiguous, ignored }
 }
 
 export function MatchingStep() {
@@ -42,7 +59,9 @@ export function MatchingStep() {
   const queryClient = useQueryClient()
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL')
   const [editing, setEditing] = useState<Candidate | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<Candidate | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [selectedRow, setSelectedRow] = useState<{
     rowNumber: number
     label: string
@@ -68,9 +87,16 @@ export function MatchingStep() {
     [],
   )
 
+  const statusCounts = useMemo(
+    () => countByStatus(candidatesQuery.data?.candidates ?? []),
+    [candidatesQuery.data],
+  )
+
   const statusFiltered = useMemo(() => {
     const all = candidatesQuery.data?.candidates ?? []
-    if (statusFilter === 'ALL') return all
+    if (statusFilter === 'ALL') {
+      return all.filter((c) => c.status !== 'IGNORED')
+    }
     return all.filter((c) => c.status === statusFilter)
   }, [candidatesQuery.data, statusFilter])
 
@@ -91,16 +117,26 @@ export function MatchingStep() {
       setEditing(null)
       setSelectedRow(null)
       setActionError(null)
+      setActionMessage('نگاشت ذخیره شد و در تطابق‌های بعدی همین تأمین‌کننده اولویت دارد.')
       if (!sessionId) return
-      await invalidateSessionData(
-        queryClient,
-        sessionId,
-        summary?.supplier_key,
-      )
-      const next = await api.getSession(sessionId)
-      setSummary(next)
+      try {
+        await invalidateSessionData(
+          queryClient,
+          sessionId,
+          summary?.supplier_key,
+        )
+        const next = await api.getSession(sessionId)
+        setSummary(next)
+      } catch (err) {
+        if (isApiError(err) && err.sessionExpired) {
+          reset()
+          setActionMessage(null)
+          setActionError(translateApiDetail(err.detail))
+        }
+      }
     },
     onError: (err) => {
+      setActionMessage(null)
       if (isApiError(err) && err.sessionExpired) {
         reset()
         setActionError(translateApiDetail(err.detail))
@@ -114,8 +150,90 @@ export function MatchingStep() {
     },
   })
 
+  const ignoreMutation = useMutation({
+    mutationFn: async (candidateId: string) =>
+      enqueueSessionOp(() => api.ignoreCandidate(sessionId!, candidateId)),
+    onSuccess: async () => {
+      setPendingDelete(null)
+      setActionError(null)
+      setActionMessage(
+        'محصول حذف شد و فقط در تب حذف‌شده دیده می‌شود. داده تأمین‌کننده و پایونیرز پاک نشده است.',
+      )
+      if (!sessionId) return
+      try {
+        await invalidateSessionData(
+          queryClient,
+          sessionId,
+          summary?.supplier_key,
+        )
+        const next = await api.getSession(sessionId)
+        setSummary(next)
+      } catch (err) {
+        if (isApiError(err) && err.sessionExpired) {
+          reset()
+          setActionMessage(null)
+          setActionError(translateApiDetail(err.detail))
+        }
+      }
+    },
+    onError: (err) => {
+      setPendingDelete(null)
+      setActionMessage(null)
+      if (isApiError(err) && err.sessionExpired) {
+        reset()
+        setActionError(translateApiDetail(err.detail))
+        return
+      }
+      setActionError(
+        translateApiDetail(isApiError(err) ? err.detail : 'خطا در حذف محصول'),
+      )
+    },
+  })
+
+  const restoreMutation = useMutation({
+    mutationFn: async (candidateId: string) =>
+      enqueueSessionOp(() => api.restoreCandidate(sessionId!, candidateId)),
+    onSuccess: async () => {
+      setActionError(null)
+      setActionMessage('محصول بازگردانی شد و دوباره در تطابق قرار گرفت.')
+      if (!sessionId) return
+      try {
+        await invalidateSessionData(
+          queryClient,
+          sessionId,
+          summary?.supplier_key,
+        )
+        const next = await api.getSession(sessionId)
+        setSummary(next)
+      } catch (err) {
+        if (isApiError(err) && err.sessionExpired) {
+          reset()
+          setActionMessage(null)
+          setActionError(translateApiDetail(err.detail))
+        }
+      }
+    },
+    onError: (err) => {
+      setActionMessage(null)
+      if (isApiError(err) && err.sessionExpired) {
+        reset()
+        setActionError(translateApiDetail(err.detail))
+        return
+      }
+      setActionError(
+        translateApiDetail(
+          isApiError(err) ? err.detail : 'خطا در بازگردانی محصول',
+        ),
+      )
+    },
+  })
+
   const opsPending =
-    pendingSessionOps > 0 || exportInFlight || confirmMutation.isPending
+    pendingSessionOps > 0 ||
+    exportInFlight ||
+    confirmMutation.isPending ||
+    ignoreMutation.isPending ||
+    restoreMutation.isPending
 
   if (!sessionId) {
     return (
@@ -158,8 +276,9 @@ export function MatchingStep() {
     )
   }
 
-  const data = candidatesQuery.data!
-  const unresolved = data.unmatched_count + data.ambiguous_count
+  const unresolved = statusCounts.unmatched + statusCounts.ambiguous
+  const activeCount =
+    statusCounts.matched + statusCounts.unmatched + statusCounts.ambiguous
 
   return (
     <section className="panel">
@@ -171,13 +290,16 @@ export function MatchingStep() {
 
       <div className="chip-row">
         <span className="chip">
-          متطابق: <strong>{data.matched_count}</strong>
+          متطابق: <strong>{statusCounts.matched}</strong>
         </span>
         <span className="chip">
-          بدون تطابق: <strong>{data.unmatched_count}</strong>
+          بدون تطابق: <strong>{statusCounts.unmatched}</strong>
         </span>
         <span className="chip">
-          مبهم: <strong>{data.ambiguous_count}</strong>
+          مبهم: <strong>{statusCounts.ambiguous}</strong>
+        </span>
+        <span className="chip">
+          حذف‌شده: <strong>{statusCounts.ignored}</strong>
         </span>
         {unresolved > 0 ? (
           <span className="chip">
@@ -191,27 +313,35 @@ export function MatchingStep() {
           {unresolved} محصول هنوز حل نشده است. می‌توانید ادامه دهید، اما در
           پیش‌نمایش قیمت فقط محصولات متطابق نمایش داده می‌شوند.
         </Alert>
+      ) : activeCount === 0 && statusCounts.ignored > 0 ? (
+        <Alert tone="info">
+          همه محصولات این فهرست حذف شده‌اند. برای بررسی دوباره، آن‌ها را از تب
+          حذف‌شده بازگردانی کنید.
+        </Alert>
       ) : (
         <Alert tone="success">همه محصولات تأمین‌کننده تطابق دارند.</Alert>
       )}
 
+      {actionMessage ? <Alert tone="success">{actionMessage}</Alert> : null}
       {actionError ? <Alert tone="error">{actionError}</Alert> : null}
 
       <div className="toolbar">
         <div className="tabs" role="tablist" aria-label="فیلتر وضعیت">
           {(
             [
-              ['ALL', 'همه'],
-              ['MATCHED', 'متطابق'],
-              ['UNMATCHED', 'بدون تطابق'],
-              ['AMBIGUOUS', 'مبهم'],
+              ['ALL', 'همه', activeCount],
+              ['MATCHED', 'متطابق', statusCounts.matched],
+              ['UNMATCHED', 'بدون تطابق', statusCounts.unmatched],
+              ['AMBIGUOUS', 'مبهم', statusCounts.ambiguous],
+              ['IGNORED', 'حذف‌شده', statusCounts.ignored],
             ] as const
-          ).map(([key, label]) => (
+          ).map(([key, label, count]) => (
             <button
               key={key}
               type="button"
               role="tab"
               aria-selected={statusFilter === key}
+              aria-label={`${label} (${count})`}
               className={statusFilter === key ? 'is-active' : ''}
               onClick={() => {
                 setStatusFilter(key)
@@ -219,6 +349,7 @@ export function MatchingStep() {
               }}
             >
               {label}
+              <span className="tab-count"> ({count})</span>
             </button>
           ))}
         </div>
@@ -270,20 +401,62 @@ export function MatchingStep() {
                     <Badge tone={statusTone(c.status)}>
                       {MATCH_STATUS_LABEL[c.status] ?? c.status}
                     </Badge>
+                    {c.warnings.filter((warning) =>
+                      SAVED_TARGET_WARNING.test(warning),
+                    ).map((warning) => (
+                      <div key={warning} className="field-hint">
+                        {translateApiDetail(warning)}
+                      </div>
+                    ))}
                   </td>
                   <td>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={opsPending}
-                      onClick={() => {
-                        setEditing(c)
-                        setSelectedRow(null)
-                        setActionError(null)
-                      }}
-                    >
-                      {c.status === 'MATCHED' ? 'اصلاح' : 'تطابق دستی'}
-                    </Button>
+                    <div className="row-actions inline">
+                      {c.status === 'IGNORED' ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={opsPending}
+                          onClick={() => {
+                            setActionError(null)
+                            setActionMessage(null)
+                            restoreMutation.mutate(c.candidate_id)
+                          }}
+                        >
+                          {restoreMutation.isPending ? 'در حال بازگردانی…' : 'بازگردانی'}
+                        </Button>
+                      ) : (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={opsPending}
+                            onClick={() => {
+                              setEditing(c)
+                              setPendingDelete(null)
+                              setSelectedRow(null)
+                              setActionError(null)
+                              setActionMessage(null)
+                            }}
+                          >
+                            {c.status === 'MATCHED' ? 'اصلاح' : 'تطابق دستی'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            disabled={opsPending}
+                            onClick={() => {
+                              setEditing(null)
+                              setSelectedRow(null)
+                              setPendingDelete(c)
+                              setActionError(null)
+                              setActionMessage(null)
+                            }}
+                          >
+                            حذف
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))
@@ -332,6 +505,42 @@ export function MatchingStep() {
           ادامه به پیش‌نمایش قیمت
         </Button>
       </div>
+
+      {pendingDelete ? (
+        <Modal
+          title="حذف محصول"
+          onClose={() => {
+            if (!ignoreMutation.isPending) setPendingDelete(null)
+          }}
+          actions={
+            <>
+              <Button
+                variant="danger"
+                disabled={ignoreMutation.isPending}
+                onClick={() => ignoreMutation.mutate(pendingDelete.candidate_id)}
+              >
+                {ignoreMutation.isPending ? 'در حال حذف…' : 'حذف'}
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={ignoreMutation.isPending}
+                onClick={() => setPendingDelete(null)}
+              >
+                انصراف
+              </Button>
+            </>
+          }
+        >
+          <p>
+            «{pendingDelete.supplier_name}» از بررسی تطابق، پیش‌نمایش قیمت و
+            خروجی اکسل کنار گذاشته می‌شود.
+          </p>
+          <p className="field-hint">
+            این حذف دائمیِ داده نیست. ردیف تأمین‌کننده و محصول پایونیرز پاک
+            نمی‌شوند و از تب حذف‌شده قابل بازگردانی است.
+          </p>
+        </Modal>
+      ) : null}
 
       {editing ? (
         <Modal

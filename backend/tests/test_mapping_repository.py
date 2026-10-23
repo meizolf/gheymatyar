@@ -158,3 +158,96 @@ def test_mappings_are_supplier_specific(session: Session) -> None:
         repo.list_for_supplier(a)[0].pioneers_name_raw
         != repo.list_for_supplier(b)[0].pioneers_name_raw
     )
+
+
+def test_upsert_keeps_same_name_variants_separate(session: Session) -> None:
+    supplier_id = _supplier(session)
+    repo = MappingRepository(session)
+    first = repo.upsert(
+        supplier_id=supplier_id,
+        supplier_name_raw="کالای مشترک 20",
+        supplier_code="VARIANT-A",
+        unit="متر",
+        pioneers_name_raw="نگه دار",
+        pioneers_code="1",
+    )
+    second = repo.upsert(
+        supplier_id=supplier_id,
+        supplier_name_raw="کالای مشترک 20",
+        supplier_code="VARIANT-B",
+        unit="متر",
+        pioneers_name_raw="حذف شونده",
+        pioneers_code="2",
+    )
+    other_unit = repo.upsert(
+        supplier_id=supplier_id,
+        supplier_name_raw="کالای مشترک 20",
+        supplier_code="VARIANT-A",
+        unit="شاخه",
+        pioneers_name_raw="واحد دیگر",
+        pioneers_code="3",
+    )
+    assert len({first.id, second.id, other_unit.id}) == 3
+    again = repo.upsert(
+        supplier_id=supplier_id,
+        supplier_name_raw="کالای مشترک 20",
+        supplier_code="VARIANT-A",
+        unit="متر",
+        pioneers_name_raw="نگه دار اصلاح",
+        pioneers_code="9",
+    )
+    assert again.id == first.id
+    assert again.pioneers_code == "9"
+    assert repo.get_by_id(second.id) is not None
+    assert repo.get_by_id(second.id).pioneers_code == "2"
+    assert repo.get_by_id(other_unit.id).pioneers_code == "3"
+
+
+def test_upsert_none_clears_pioneers_code(session: Session) -> None:
+    supplier_id = _supplier(session)
+    repo = MappingRepository(session)
+    first = repo.upsert(
+        supplier_id=supplier_id,
+        supplier_name_raw="کالای مشترک 20",
+        supplier_code="VARIANT-A",
+        unit="متر",
+        pioneers_name_raw="هدف کددار",
+        pioneers_code="DROP",
+    )
+    cleared = repo.upsert(
+        supplier_id=supplier_id,
+        supplier_name_raw="کالای مشترک 20",
+        supplier_code="VARIANT-A",
+        unit="متر",
+        pioneers_name_raw="هدف بی‌کد",
+        pioneers_code=None,
+    )
+    assert cleared.id == first.id
+    assert cleared.pioneers_code is None
+    assert cleared.legacy_unscoped is False
+
+
+def test_update_omitted_code_is_kept_and_null_clears_it(session: Session) -> None:
+    supplier_id = _supplier(session)
+    repo = MappingRepository(session)
+    created = repo.create(
+        supplier_id=supplier_id,
+        supplier_name_raw="کالای مشترک 20",
+        supplier_code="VARIANT-A",
+        pioneers_name_raw="هدف",
+        pioneers_code="111",
+        mapping_type=MappingType.MANUAL,
+    )
+    kept = repo.update(
+        supplier_id=supplier_id,
+        identity_key=created.identity_key,
+        pioneers_name_raw="هدف جدید",
+    )
+    assert kept.pioneers_code == "111"
+    cleared = repo.update(
+        supplier_id=supplier_id,
+        identity_key=created.identity_key,
+        pioneers_name_raw="بی‌کد",
+        pioneers_code=None,
+    )
+    assert cleared.pioneers_code is None

@@ -54,6 +54,7 @@ class SessionSummaryResponse(BaseModel):
     matched_count: int = 0
     unmatched_count: int = 0
     ambiguous_count: int = 0
+    ignored_count: int = 0
     warning_count: int = 0
     exportable_count: int = 0
     parse_warnings: list[str] = Field(default_factory=list)
@@ -124,6 +125,7 @@ class CandidatesResponse(BaseModel):
     matched_count: int
     unmatched_count: int
     ambiguous_count: int
+    ignored_count: int = 0
     candidates: list[CandidateResponse]
 
 
@@ -178,6 +180,9 @@ class MappingResponse(BaseModel):
     pioneers_name_raw: str
     pioneers_name_normalized: str
     pioneers_code: str | None = None
+    supplier_code: str | None = None
+    unit_normalized: str | None = None
+    legacy_unscoped: bool = False
     mapping_type: str
     created_at: str
     updated_at: str

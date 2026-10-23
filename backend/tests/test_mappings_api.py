@@ -98,6 +98,51 @@ def test_mapping_update_and_delete(
     assert all(m["id"] != mid for m in after.json()["mappings"])
 
 
+def test_mapping_update_distinguishes_omitted_code_from_null(client) -> None:
+    database = client.app.state.database
+    with database.session() as sess:
+        supplier = SupplierRepository(sess).create(
+            name="آذین لوله", parser_type="azin_pipe"
+        )
+        MappingRepository(sess).create(
+            supplier_id=supplier.id,
+            supplier_name_raw="کالای مشترک 20",
+            supplier_code="VARIANT-A",
+            pioneers_name_raw="هدف",
+            pioneers_code="111",
+            mapping_type=MappingType.MANUAL,
+        )
+        MappingRepository(sess).create(
+            supplier_id=supplier.id,
+            supplier_name_raw="کالای مشترک 20",
+            supplier_code="VARIANT-B",
+            pioneers_name_raw="هدف دیگر",
+            pioneers_code="222",
+            mapping_type=MappingType.MANUAL,
+        )
+
+    listed = client.get("/api/suppliers/azin_pipe/mappings")
+    assert listed.status_code == 200
+    rows = {row["supplier_code"]: row for row in listed.json()["mappings"]}
+    omitted = client.put(
+        f"/api/suppliers/azin_pipe/mappings/{rows['VARIANT-A']['id']}",
+        json={"pioneers_name_raw": "هدف"},
+    )
+    assert omitted.status_code == 200, omitted.text
+    assert omitted.json()["pioneers_code"] == "111"
+
+    cleared = client.put(
+        f"/api/suppliers/azin_pipe/mappings/{rows['VARIANT-A']['id']}",
+        json={"pioneers_name_raw": "بی‌کد", "pioneers_code": None},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["pioneers_code"] is None
+
+    untouched = client.get("/api/suppliers/azin_pipe/mappings").json()["mappings"]
+    other = next(row for row in untouched if row["supplier_code"] == "VARIANT-B")
+    assert other["pioneers_code"] == "222"
+
+
 def test_delete_missing_mapping(client) -> None:
     response = client.delete("/api/suppliers/azin_pipe/mappings/999999")
     assert response.status_code == 404

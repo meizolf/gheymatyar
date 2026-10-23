@@ -49,6 +49,7 @@ export interface SessionSummary {
   matched_count: number
   unmatched_count: number
   ambiguous_count: number
+  ignored_count?: number
   warning_count: number
   exportable_count: number
   parse_warnings: string[]
@@ -59,7 +60,7 @@ export interface SessionCreateResponse {
   session_id: string
 }
 
-export type MatchStatus = 'MATCHED' | 'UNMATCHED' | 'AMBIGUOUS'
+export type MatchStatus = 'MATCHED' | 'UNMATCHED' | 'AMBIGUOUS' | 'IGNORED'
 export type ReviewDecision = 'INCLUDE' | 'EXCLUDE' | 'APPROVE'
 export type MatchType = 'SAVED_MAPPING' | 'EXACT_NAME' | 'MANUAL'
 
@@ -102,6 +103,7 @@ export interface CandidatesResponse {
   matched_count: number
   unmatched_count: number
   ambiguous_count: number
+  ignored_count?: number
   candidates: Candidate[]
 }
 
@@ -135,6 +137,9 @@ export interface Mapping {
   pioneers_name_raw: string
   pioneers_name_normalized: string
   pioneers_code: string | null
+  supplier_code?: string | null
+  unit_normalized?: string | null
+  legacy_unscoped?: boolean
   mapping_type: string
   created_at: string
   updated_at: string

@@ -19,6 +19,7 @@ from gheymatyar.db.models import (
     JobStatus,
     ProductMappingRow,
     SettingRow,
+    SupplierProductDecisionRow,
     SupplierRow,
 )
 
@@ -31,6 +32,7 @@ __all__ = [
     "MigrationError",
     "ProductMappingRow",
     "SettingRow",
+    "SupplierProductDecisionRow",
     "SupplierRow",
     "create_engine_for_url",
     "create_session_factory",

@@ -193,6 +193,18 @@ export const api = {
       },
     ),
 
+  ignoreCandidate: (sessionId: string, candidateId: string) =>
+    requestJson<Candidate>(
+      `/sessions/${encodeURIComponent(sessionId)}/candidates/${encodeURIComponent(candidateId)}/ignore`,
+      { method: 'POST' },
+    ),
+
+  restoreCandidate: (sessionId: string, candidateId: string) =>
+    requestJson<Candidate>(
+      `/sessions/${encodeURIComponent(sessionId)}/candidates/${encodeURIComponent(candidateId)}/restore`,
+      { method: 'POST' },
+    ),
+
   setReview: (
     sessionId: string,
     candidateId: string,

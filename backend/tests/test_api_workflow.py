@@ -83,9 +83,13 @@ def test_end_to_end_azin_workflow(
     )
     assert match_resp.status_code == 200, match_resp.text
     payload = match_resp.json()
-    assert payload["matched_count"] + payload["unmatched_count"] + payload[
-        "ambiguous_count"
-    ] == len(payload["candidates"])
+    assert (
+        payload["matched_count"]
+        + payload["unmatched_count"]
+        + payload["ambiguous_count"]
+        + payload["ignored_count"]
+        == len(payload["candidates"])
+    )
 
     # Confirmed printed Rial: no generic listed-basis blocker. Soft suspicious-%
     # warnings still need APPROVE; only نرخ فروش اصلی may change on export.

@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Any, Optional
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Integer,
@@ -114,22 +115,28 @@ class SupplierRow(Base):
     )
 
     mappings: Mapped[list[ProductMappingRow]] = relationship(back_populates="supplier")
+    decisions: Mapped[list[SupplierProductDecisionRow]] = relationship(
+        back_populates="supplier"
+    )
     jobs: Mapped[list[JobRow]] = relationship(back_populates="supplier")
 
 
 class ProductMappingRow(Base):
-    """Supplier-specific confirmed product-name mappings.
+    """Supplier-specific confirmed mappings, one per product variant.
 
-    Excel row numbers are never stored. Product codes are optional secondary
-    verification references only.
+    Identity is the supplier plus normalized name, supplier code, and unit.
+    Excel row numbers are never stored. ``pioneers_code`` is an optional
+    target reference and is null when the confirmed Pioneers row has no code.
+    ``legacy_unscoped`` rows were saved before variants were distinguished and
+    apply only when the current upload has a single product with that name.
     """
 
     __tablename__ = "product_mappings"
     __table_args__ = (
         UniqueConstraint(
             "supplier_id",
-            "supplier_name_normalized",
-            name="uq_product_mappings_supplier_name",
+            "identity_key",
+            name="uq_product_mappings_supplier_variant",
         ),
     )
 
@@ -139,8 +146,12 @@ class ProductMappingRow(Base):
         ForeignKey("suppliers.id", ondelete="CASCADE"),
         nullable=False,
     )
+    identity_key: Mapped[str] = mapped_column(Text, nullable=False)
     supplier_name_raw: Mapped[str] = mapped_column(Text, nullable=False)
     supplier_name_normalized: Mapped[str] = mapped_column(String(512), nullable=False)
+    supplier_code: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    unit_normalized: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    legacy_unscoped: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     pioneers_name_raw: Mapped[str] = mapped_column(Text, nullable=False)
     pioneers_name_normalized: Mapped[str] = mapped_column(String(512), nullable=False)
     pioneers_code: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -159,6 +170,52 @@ class ProductMappingRow(Base):
     )
 
     supplier: Mapped[SupplierRow] = relationship(back_populates="mappings")
+
+
+class SupplierProductDecisionRow(Base):
+    """Persistent ignore/restore decision for one supplier product identity.
+
+    Identity is the supplier plus a stable key (normalized name, code, unit).
+    Session ids, PDF filenames, and Excel row numbers are not stored.
+    ``IGNORED`` is a soft-delete: supplier and Pioneers rows are never removed.
+    ``ACTIVE`` records an explicit restore.
+    """
+
+    __tablename__ = "supplier_product_decisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "supplier_id",
+            "identity_key",
+            name="uq_supplier_product_decisions_identity",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    supplier_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("suppliers.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    identity_key: Mapped[str] = mapped_column(Text, nullable=False)
+    supplier_name_raw: Mapped[str] = mapped_column(Text, nullable=False)
+    supplier_name_normalized: Mapped[str] = mapped_column(String(512), nullable=False)
+    supplier_code: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    unit_normalized: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # IGNORED (soft-delete) or ACTIVE (restored / explicitly not ignored)
+    decision: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(),
+        nullable=False,
+        default=utc_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+    supplier: Mapped[SupplierRow] = relationship(back_populates="decisions")
 
 
 class JobRow(Base):

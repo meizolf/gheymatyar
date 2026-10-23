@@ -12,6 +12,8 @@ vi.mock('../api/client', () => ({
   api: {
     listCandidates: vi.fn(),
     confirmMapping: vi.fn(),
+    ignoreCandidate: vi.fn(),
+    restoreCandidate: vi.fn(),
     getSession: vi.fn(),
     searchProducts: vi.fn(),
     createSession: vi.fn(),
@@ -66,7 +68,7 @@ describe('MatchingStep', () => {
     const user = userEvent.setup()
     renderMatching()
     await screen.findByText('محصول الف تأمین')
-    await user.click(screen.getByRole('tab', { name: 'بدون تطابق' }))
+    await user.click(screen.getByRole('tab', { name: /بدون تطابق/ }))
     const table = screen.getByRole('table')
     expect(within(table).getByText('محصول ج تأمین')).toBeInTheDocument()
     expect(within(table).queryByText('محصول الف تأمین')).not.toBeInTheDocument()
@@ -109,6 +111,119 @@ describe('MatchingStep', () => {
     await user.click(screen.getByRole('button', { name: /تأیید و ذخیره نگاشت/ }))
     await waitFor(() => {
       expect(api.confirmMapping).toHaveBeenCalledWith('sess-1', 'c3', 20, true)
+    })
+    expect(
+      await screen.findByText(/نگاشت ذخیره شد/),
+    ).toBeInTheDocument()
+  })
+
+  it('asks before deleting and moves a matched product to the deleted tab', async () => {
+    const user = userEvent.setup()
+    const afterDelete = structuredClone(candidatesResponseFixture)
+    afterDelete.candidates = afterDelete.candidates.map((candidate) =>
+      candidate.candidate_id === 'c1'
+        ? {
+            ...candidate,
+            status: 'IGNORED',
+            review_decision: 'EXCLUDE',
+            exportable: false,
+          }
+        : candidate,
+    )
+    afterDelete.matched_count = 1
+    afterDelete.ignored_count = 1
+    let ignored = false
+    vi.mocked(api.listCandidates).mockImplementation(async () =>
+      structuredClone(ignored ? afterDelete : candidatesResponseFixture),
+    )
+    vi.mocked(api.ignoreCandidate).mockImplementation(async () => {
+      ignored = true
+      return afterDelete.candidates[0]
+    })
+
+    renderMatching()
+    await screen.findByText('محصول الف تأمین')
+    const table = screen.getByRole('table')
+    const matchedRow = within(table)
+      .getAllByRole('row')
+      .find((row) => within(row).queryByText('محصول الف تأمین'))!
+    expect(within(matchedRow).getByRole('button', { name: 'اصلاح' })).toBeInTheDocument()
+    await user.click(within(matchedRow).getByRole('button', { name: 'حذف' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/قابل بازگردانی/)).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'حذف' }))
+
+    expect(
+      await screen.findByText(/فقط در تب حذف‌شده/),
+    ).toBeInTheDocument()
+    await waitFor(() => {
+      expect(api.ignoreCandidate).toHaveBeenCalledWith('sess-1', 'c1')
+    })
+    await user.click(screen.getByRole('tab', { name: /حذف‌شده/ }))
+    expect(within(screen.getByRole('table')).getByText('محصول الف تأمین')).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('table')).getByRole('button', { name: 'بازگردانی' }),
+    ).toBeInTheDocument()
+  })
+
+  it('does not show a successful delete when the request fails', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.ignoreCandidate).mockRejectedValue(
+      new ApiError(500, 'database is locked'),
+    )
+    renderMatching()
+    await screen.findByText('محصول ج تأمین')
+    const table = screen.getByRole('table')
+    const unmatchedRow = within(table)
+      .getAllByRole('row')
+      .find((row) => within(row).queryByText('محصول ج تأمین'))!
+    expect(
+      within(unmatchedRow).getByRole('button', { name: 'حذف' }),
+    ).toBeInTheDocument()
+    await user.click(within(unmatchedRow).getByRole('button', { name: 'حذف' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: 'حذف' }))
+    expect(await screen.findByText('database is locked')).toBeInTheDocument()
+    expect(screen.queryByText(/محصول حذف شد/)).not.toBeInTheDocument()
+    expect(screen.getByText('محصول ج تأمین')).toBeInTheDocument()
+  })
+
+  it('restores a deleted product through the API', async () => {
+    const user = userEvent.setup()
+    const ignored = structuredClone(candidatesResponseFixture)
+    ignored.candidates = [
+      ...ignored.candidates,
+      {
+        ...ignored.candidates[2],
+        candidate_id: 'c-ignored',
+        supplier_name: 'محصول حذف‌شده',
+        status: 'IGNORED',
+        review_decision: 'EXCLUDE',
+        exportable: false,
+      },
+    ]
+    const restored = structuredClone(ignored)
+    restored.candidates = restored.candidates.map((candidate) =>
+      candidate.candidate_id === 'c-ignored'
+        ? { ...candidate, status: 'UNMATCHED' }
+        : candidate,
+    )
+    let didRestore = false
+    vi.mocked(api.listCandidates).mockImplementation(async () =>
+      structuredClone(didRestore ? restored : ignored),
+    )
+    vi.mocked(api.restoreCandidate).mockImplementation(async () => {
+      didRestore = true
+      return restored.candidates.find((row) => row.candidate_id === 'c-ignored')!
+    })
+
+    renderMatching()
+    await screen.findByText('محصول الف تأمین')
+    await user.click(screen.getByRole('tab', { name: /حذف‌شده/ }))
+    await user.click(screen.getByRole('button', { name: 'بازگردانی' }))
+    expect(await screen.findByText(/بازگردانی شد/)).toBeInTheDocument()
+    await waitFor(() => {
+      expect(api.restoreCandidate).toHaveBeenCalledWith('sess-1', 'c-ignored')
     })
   })
 })

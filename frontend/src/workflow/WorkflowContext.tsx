@@ -66,11 +66,20 @@ function readStoredStep(): WizardStep {
   return 1
 }
 
+function hasMatchResults(summary: SessionSummary): boolean {
+  return (
+    summary.matched_count +
+      summary.unmatched_count +
+      summary.ambiguous_count +
+      (summary.ignored_count ?? 0) >
+    0
+  )
+}
+
 function inferStepFromSummary(summary: SessionSummary, stored: WizardStep): WizardStep {
   const hasExcel = Boolean(summary.pioneers_filename && summary.product_count > 0)
   const hasPdf = Boolean(summary.pdf_filename && summary.supplier_item_count > 0)
-  const hasMatch =
-    summary.matched_count + summary.unmatched_count + summary.ambiguous_count > 0
+  const hasMatch = hasMatchResults(summary)
   if (!hasExcel && !hasPdf) return 1
   if (!hasMatch) return 1
   // Prefer stored step when still reachable
@@ -173,8 +182,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         setSessionId(sid)
         setSummary(data)
-        const hasMatch =
-          data.matched_count + data.unmatched_count + data.ambiguous_count > 0
+        const hasMatch = hasMatchResults(data)
         setMatchedDone(hasMatch)
         setStep(inferStepFromSummary(data, readStoredStep()))
         setRestoreError(null)

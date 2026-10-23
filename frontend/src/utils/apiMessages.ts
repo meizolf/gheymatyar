@@ -109,6 +109,22 @@ const PATTERNS: Array<{ re: RegExp; fa: string | ((m: RegExpMatchArray) => strin
     fa: 'نگاشت یافت نشد.',
   },
   {
+    re: /ignored supplier products must be restored/i,
+    fa: 'این محصول حذف شده است. ابتدا آن را از تب حذف‌شده بازگردانی کنید.',
+  },
+  {
+    re: /saved Pioneers mapping no longer identifies a single product/i,
+    fa: 'محصول پایونیرزِ این نگاشت در فایل فعلی یکتا نیست یا وجود ندارد. قبل از ادامه باید دوباره نگاشت شود.',
+  },
+  {
+    re: /saved mapping has no supplier code or unit/i,
+    fa: 'این نگاشت کد یا واحد تأمین‌کننده ندارد و به یک نوع مشخص وصل نمی‌شود. این کد و واحد را جداگانه تأیید کنید.',
+  },
+  {
+    re: /could not save the decision/i,
+    fa: 'ذخیرهٔ تصمیم انجام نشد. وضعیت قبلی حفظ شده است.',
+  },
+  {
     re: /price change (-?[\d.]+)% exceeds ([\d.]+)% threshold/i,
     fa: (m) =>
       `تغییر قیمت ${m[1]}٪ از آستانه ${m[2]}٪ بیشتر است و نیاز به تأیید هشدار دارد.`,

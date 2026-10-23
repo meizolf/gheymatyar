@@ -40,6 +40,7 @@ class ProcessingSession:
     matched_count: int = 0
     unmatched_count: int = 0
     ambiguous_count: int = 0
+    ignored_count: int = 0
     output_path: Path | None = None
     work_dir: Path | None = None
     metadata: dict[str, Any] = field(default_factory=dict)

@@ -27,7 +27,25 @@ class ProductMappingRecord:
     pioneers_name_raw: str
     pioneers_name_normalized: str
     pioneers_code: str | None
+    identity_key: str
+    supplier_code: str | None
+    unit_normalized: str | None
+    legacy_unscoped: bool
     mapping_type: str
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class SupplierProductDecisionRecord:
+    id: int
+    supplier_id: int
+    identity_key: str
+    supplier_name_raw: str
+    supplier_name_normalized: str
+    supplier_code: str | None
+    unit_normalized: str | None
+    decision: str
     created_at: datetime
     updated_at: datetime
 

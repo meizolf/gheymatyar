@@ -35,7 +35,7 @@ python ../scripts/e2e_fixture_check.py
 - `parsers/` — Pioneers Excel reader
 - `services/` — matching, price validation, Excel writer, sessions, orchestration
 - `suppliers/` — pluggable PDF processors (`azin_pipe` today)
-- `repositories/` — SQLite persistence (suppliers, name mappings, settings)
+- `repositories/` — SQLite persistence (suppliers, name mappings, ignored products, settings)
 - `api/` — FastAPI routes (thin controllers)
 - `static_spa.py` — React production build mount + SPA fallback
 

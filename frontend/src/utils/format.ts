@@ -30,6 +30,7 @@ export const MATCH_STATUS_LABEL: Record<string, string> = {
   MATCHED: 'متطابق',
   UNMATCHED: 'بدون تطابق',
   AMBIGUOUS: 'مبهم',
+  IGNORED: 'حذف‌شده',
 }
 
 export const REVIEW_LABEL: Record<string, string> = {

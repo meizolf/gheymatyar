@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from gheymatyar.api.deps import get_db_session, get_processing_service
@@ -202,6 +204,7 @@ def run_match(
         matched_count=session.matched_count,
         unmatched_count=session.unmatched_count,
         ambiguous_count=session.ambiguous_count,
+        ignored_count=session.ignored_count,
         candidates=[
             CandidateResponse(**candidate_to_dict(c)) for c in session.candidates
         ],
@@ -215,12 +218,14 @@ def run_match(
 def list_candidates(
     session_id: str,
     status: str | None = Query(
-        default=None, description="Optional MATCHED|UNMATCHED|AMBIGUOUS filter"
+        default=None,
+        description="Optional MATCHED|UNMATCHED|AMBIGUOUS|IGNORED filter",
     ),
     service: ProcessingService = Depends(get_processing_service),
+    db: Session = Depends(get_db_session),
 ) -> CandidatesResponse:
     try:
-        session = service.get_session(session_id)
+        session = service.apply_saved_ignores(session_id, db)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
 
@@ -237,6 +242,7 @@ def list_candidates(
         matched_count=session.matched_count,
         unmatched_count=session.unmatched_count,
         ambiguous_count=session.ambiguous_count,
+        ignored_count=session.ignored_count,
         candidates=[CandidateResponse(**candidate_to_dict(c)) for c in candidates],
     )
 
@@ -248,10 +254,14 @@ def list_candidates(
 def price_preview(
     session_id: str,
     service: ProcessingService = Depends(get_processing_service),
+    db: Session = Depends(get_db_session),
 ) -> CandidatesResponse:
-    """Return matched candidates (price-change preview)."""
+    """Return matched candidates (price-change preview).
+
+    Ignored supplier products are excluded even if the session is stale.
+    """
     try:
-        session = service.get_session(session_id)
+        session = service.apply_saved_ignores(session_id, db)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
     matched = [c for c in session.candidates if c.status == MatchStatus.MATCHED]
@@ -260,6 +270,7 @@ def price_preview(
         matched_count=session.matched_count,
         unmatched_count=session.unmatched_count,
         ambiguous_count=session.ambiguous_count,
+        ignored_count=session.ignored_count,
         candidates=[CandidateResponse(**candidate_to_dict(c)) for c in matched],
     )
 
@@ -304,6 +315,56 @@ def confirm_mapping(
         raise HTTPException(status_code=404, detail="session or candidate not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=500, detail="could not save the decision") from exc
+    return CandidateResponse(**candidate_to_dict(updated))
+
+
+@router.post(
+    "/sessions/{session_id}/candidates/{candidate_id}/ignore",
+    response_model=CandidateResponse,
+)
+def ignore_candidate(
+    session_id: str,
+    candidate_id: str,
+    service: ProcessingService = Depends(get_processing_service),
+    db: Session = Depends(get_db_session),
+) -> CandidateResponse:
+    """Soft-delete a supplier product. Source files and Pioneers rows stay intact."""
+    try:
+        updated = service.ignore_candidate(
+            session_id, db, candidate_id=candidate_id
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="session or candidate not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=500, detail="could not save the decision") from exc
+    return CandidateResponse(**candidate_to_dict(updated))
+
+
+@router.post(
+    "/sessions/{session_id}/candidates/{candidate_id}/restore",
+    response_model=CandidateResponse,
+)
+def restore_candidate(
+    session_id: str,
+    candidate_id: str,
+    service: ProcessingService = Depends(get_processing_service),
+    db: Session = Depends(get_db_session),
+) -> CandidateResponse:
+    """Undo a soft-delete and match the supplier product again."""
+    try:
+        updated = service.restore_candidate(
+            session_id, db, candidate_id=candidate_id
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="session or candidate not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=500, detail="could not save the decision") from exc
     return CandidateResponse(**candidate_to_dict(updated))
 
 
@@ -316,6 +377,7 @@ def set_review(
     candidate_id: str,
     body: ReviewDecisionRequest,
     service: ProcessingService = Depends(get_processing_service),
+    db: Session = Depends(get_db_session),
 ) -> CandidateResponse:
     try:
         decision = ReviewDecision(body.decision.upper())
@@ -325,7 +387,10 @@ def set_review(
         ) from exc
     try:
         updated = service.set_review_decision(
-            session_id, candidate_id=candidate_id, decision=decision
+            session_id,
+            candidate_id=candidate_id,
+            decision=decision,
+            db_session=db,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session or candidate not found") from exc
@@ -363,26 +428,25 @@ def export_excel(
 def download_excel(
     session_id: str,
     service: ProcessingService = Depends(get_processing_service),
-) -> FileResponse:
+    db: Session = Depends(get_db_session),
+) -> Response:
     try:
-        session = service.get_session(session_id)
+        content, download_name = service.read_fresh_workbook(session_id, db)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
-    if not session.supplier_confirmed:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Supplier has not been confirmed; confirm the detected supplier first"
-            ),
-        )
-    if session.output_path is None or not session.output_path.is_file():
-        raise HTTPException(status_code=404, detail="export not available; run export first")
-    download_name = "pioneers_updated.xlsx"
-    if session.pioneers_filename:
-        stem = Path(session.pioneers_filename).stem
-        download_name = f"{stem}_updated.xlsx"
-    return FileResponse(
-        path=session.output_path,
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    ascii_name = (
+        download_name.encode("ascii", "ignore").decode() or "pioneers_updated.xlsx"
+    )
+    disposition = (
+        f'attachment; filename="{ascii_name}"; '
+        f"filename*=UTF-8''{quote(download_name)}"
+    )
+    return Response(
+        content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename=download_name,
+        headers={"Content-Disposition": disposition},
     )

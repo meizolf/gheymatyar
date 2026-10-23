@@ -13,6 +13,7 @@ from gheymatyar.db.models import Base
 EXPECTED_TABLES = {
     "suppliers",
     "product_mappings",
+    "supplier_product_decisions",
     "jobs",
     "job_items",
     "settings",
@@ -61,3 +62,44 @@ def test_importing_db_module_does_not_create_files(tmp_path: Path, monkeypatch) 
 
 def test_metadata_bound_to_declarative_base() -> None:
     assert "suppliers" in Base.metadata.tables
+    assert "supplier_product_decisions" in Base.metadata.tables
+
+
+def test_existing_name_mappings_survive_decision_table(tmp_path: Path) -> None:
+    """Adding supplier_product_decisions must not rewrite product_mappings."""
+    from sqlalchemy import inspect, text
+
+    from gheymatyar.db.database import init_db
+    from gheymatyar.domain import MappingType
+    from gheymatyar.repositories import MappingRepository, SupplierRepository
+
+    database = Database(f"sqlite:///{tmp_path / 'legacy.db'}")
+    database.create_tables()
+    with database.session() as session:
+        supplier_id = SupplierRepository(session).create(
+            name="آذین لوله", parser_type="azin_pipe"
+        ).id
+        created = MappingRepository(session).create(
+            supplier_id=supplier_id,
+            supplier_name_raw="اذین لوله 20",
+            pioneers_name_raw="اذین لوله 20",
+            pioneers_code="11307",
+            mapping_type=MappingType.MANUAL,
+        )
+        mapping_id = created.id
+
+    with database.engine.begin() as conn:
+        conn.execute(text("DROP TABLE supplier_product_decisions"))
+
+    init_db(database.engine)
+    tables = set(inspect(database.engine).get_table_names())
+    assert "supplier_product_decisions" in tables
+    assert "product_mappings" in tables
+
+    with database.session() as session:
+        loaded = MappingRepository(session).get_by_id(mapping_id)
+        assert loaded is not None
+        assert loaded.pioneers_name_raw == "اذین لوله 20"
+        assert loaded.pioneers_code == "11307"
+        assert loaded.mapping_type == MappingType.MANUAL.value
+    database.engine.dispose()

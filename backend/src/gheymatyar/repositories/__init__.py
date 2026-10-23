@@ -12,11 +12,16 @@ from gheymatyar.repositories.exceptions import (
 )
 from gheymatyar.repositories.job_repository import JobRepository
 from gheymatyar.repositories.mapping_repository import MappingRepository
+from gheymatyar.repositories.product_decision_repository import (
+    ProductDecisionRepository,
+    ProductDecisionState,
+)
 from gheymatyar.repositories.records import (
     JobItemRecord,
     JobRecord,
     ProductMappingRecord,
     SettingRecord,
+    SupplierProductDecisionRecord,
     SupplierRecord,
 )
 from gheymatyar.repositories.settings_repository import SettingsRepository
@@ -29,10 +34,13 @@ __all__ = [
     "MappingConflictError",
     "MappingNotFoundError",
     "MappingRepository",
+    "ProductDecisionRepository",
+    "ProductDecisionState",
     "ProductMappingRecord",
     "RepositoryError",
     "SettingRecord",
     "SettingsRepository",
+    "SupplierProductDecisionRecord",
     "SupplierRecord",
     "SupplierRepository",
 ]
