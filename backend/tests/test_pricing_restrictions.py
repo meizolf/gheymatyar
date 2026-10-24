@@ -107,6 +107,11 @@ def _confirm_still_blocked(
 
     exported = client.post(f"/api/sessions/{session_id}/export")
     assert exported.status_code == 400
+    assert "no approved updates" in exported.json()["detail"]
+    assert client.get(f"/api/sessions/{session_id}/download").status_code == 404
+    rejected = _candidate(client, session_id, **needle)
+    assert rejected["exportable"] is False
+    assert any(warning_fragment in blocker for blocker in rejected["pricing_blockers"])
 
     reused_id = _upload_and_match(client, excel, pdf, supplier_key)
     reused = _candidate(client, reused_id, **needle)

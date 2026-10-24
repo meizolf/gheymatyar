@@ -117,7 +117,7 @@ Workflow: [`.github/workflows/windows-installer.yml`](../.github/workflows/windo
 7. Backend `pytest`  
 8. PyInstaller onedir  
 9. `verify_bundle.ps1` — SPA offline assets, AMD64 PE, pdfium, full native import closure (every `.dll`/`.pyd`/`.exe`; VC++ redist DLLs required when imported)  
-10. `smoke_packaged.ps1` — xlsx + HTML `.xls` (convert+compare all sheets/formulas), mapping save → restart → persist, API shutdown must exit (no silent force-kill success)  
+10. `smoke_packaged.ps1` — Azin xlsx + HTML `.xls` and Dina metre approval/export (approved products only; compare all retained cells/formulas), genuine blocked-price rejection, mapping save → restart → persist, API shutdown must exit (no silent force-kill success)
 11. Compile installer; write size + SHA-256 sidecar files  
 12. Upload artifact **`GheymatYarSetup`** (`GheymatYarSetup.exe` + checksums)
 
@@ -134,13 +134,22 @@ Retain the published `GheymatYarSetup.exe` together with its `sha256` and byte s
 | Health identity `app=gheymatyar` | Yes |
 | SPA without Google Fonts / CDN refs | Yes |
 | Shutdown without token → 403 | Yes |
-| `.xlsx` Excel + Azin PDF → export | Yes |
-| HTML-based `.xls` + PDF → export | Yes |
+| `.xlsx` Excel + Azin PDF → approve → export | Yes (confirmed printed Rial; no currency/basis setting) |
+| HTML-based `.xls` + Azin PDF → approve → export | Yes |
+| Dina per-metre approval/export at the printed Rial amount | Yes (product located by code, independent of original row number) |
+| Genuine Dina shared-descriptor price blocker survives mapping and rejects approval/export/download | Yes (HTTP 400 / 400 / 404) |
 | Source file SHA unchanged | Yes |
 | Export: approved changed rows only; within them only `نرخ فروش اصلی` changes | Yes (`compare_export.py`) |
-| Export sale-price cell matches candidate (xls) | Yes |
+| Export contains exactly the approved product code and candidate price (xlsx, xls, Dina) | Yes (`check_export_price.py` + API row counts) |
 | Explicit mapping save + EXE restart + same mapping | Yes |
 | Sanitized PATH (no VS redist dirs) | Yes |
+
+The smoke creates a unique temporary `GHEYMATYAR_DATA_DIR` for SQLite and
+downloaded workbooks. It never uses or deletes the user's application database.
+Valid Azin prices have no `pricing_blockers` and become `exportable` after
+explicit approval. Large price changes are review warnings; approval cannot
+clear a genuine supplier pricing blocker. The negative case uses Dina product
+`825952020` at `198440` Rial, whose descriptor is shared by distinct products.
 
 ## Manual Windows 10 / Pioneers verification
 

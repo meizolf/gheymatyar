@@ -6,8 +6,9 @@
 .DESCRIPTION
   Starts the windowed EXE with a sanitized PATH (no VS/dev redistributable
   directories), verifies identity via /api/health, runs Excel+PDF workflows for
-  both .xlsx and HTML-based .xls fixtures, asserts export cell/formula
-  integrity across all sheets, explicitly saves a mapping, restarts the EXE,
+  both .xlsx and HTML-based .xls fixtures, asserts approved-only export
+  cell/formula integrity, rejects a genuine supplier price blocker, explicitly
+  saves a mapping, restarts the EXE,
   and confirms the mapping survived. Uses the local control token for
   /api/shutdown. Force-kill is only used for emergency cleanup and fails the
   ViaApi shutdown path.
@@ -47,7 +48,8 @@ $ExcelXls = Join-Path $RepoRoot "fixtures\pioneers\pioneers_azin_subset.xls"
 $Pdf = Join-Path $RepoRoot "fixtures\suppliers\458_124550609784457.pdf"
 $DinaPdf = Join-Path $RepoRoot "fixtures\suppliers\dina_polymer_1405_07_04.pdf"
 $CompareScript = Join-Path $RepoRoot "scripts\windows\compare_export.py"
-foreach ($p in @($ExcelXlsx, $ExcelXls, $Pdf, $DinaPdf, $CompareScript)) {
+$PriceCheckScript = Join-Path $RepoRoot "scripts\windows\check_export_price.py"
+foreach ($p in @($ExcelXlsx, $ExcelXls, $Pdf, $DinaPdf, $CompareScript, $PriceCheckScript)) {
     if (-not (Test-Path $p)) { throw "Missing required file: $p" }
 }
 
@@ -265,10 +267,7 @@ function Invoke-Workflow {
         [string]$ExcelPath,
         [string]$Label,
         [switch]$SaveMapping,
-        [switch]$HtmlXls,
-        [string]$SupplierKey = "azin_pipe",
-        [string]$PdfPath = $Pdf,
-        [switch]$ExpectBlocked
+        [switch]$HtmlXls
     )
 
     $sourceSha = Get-FileSha256 $ExcelPath
@@ -292,9 +291,9 @@ function Invoke-Workflow {
     Write-Host "OK excel upload ($Label)"
 
     $null = Invoke-Multipart -Url "$Base/api/sessions/$sid/supplier-pdf" `
-        -FormFields @{ supplier_key = $SupplierKey } `
+        -FormFields @{ supplier_key = "azin_pipe" } `
         -FileField "file" `
-        -FilePath $PdfPath `
+        -FilePath $Pdf `
         -ContentType "application/pdf"
     Write-Host "OK pdf upload"
 
@@ -304,91 +303,48 @@ function Invoke-Workflow {
     Write-Host "OK match ($($match.candidates.Count) candidates)"
 
     $candidates = $match.candidates
-    $keep = $null
+    # Known valid fixture product: confirmed printed Rial, no length/pack multiplier.
+    $keep = $candidates | Where-Object { $_.supplier_code -eq "819121025" } | Select-Object -First 1
+    if (-not $keep -or $keep.status -ne "MATCHED" -or
+        $keep.source_currency -ne "rial" -or $keep.price_basis -ne "printed" -or
+        @($keep.pricing_blockers).Count -ne 0 -or
+        $null -eq $keep.old_price -or $null -eq $keep.new_price -or
+        [decimal]$keep.new_price -le 0 -or [decimal]$keep.new_price -eq [decimal]$keep.old_price) {
+        throw "$Label expected the valid, changed Azin printed-Rial product 819121025"
+    }
+    if ($keep.exportable) { throw "$Label product was exportable before explicit approval" }
     $savedMappingKey = $null
 
     if ($SaveMapping) {
-        $needy = $candidates | Where-Object {
-            $_.status -in @("UNMATCHED", "AMBIGUOUS") -and $_.suggestions -and $_.suggestions.Count -gt 0
-        } | Select-Object -First 1
-        if (-not $needy) {
-            $matched = $candidates | Where-Object { $_.status -eq "MATCHED" } | Select-Object -First 1
-            if (-not $matched) { throw "No candidate available to save a mapping" }
-            $keep = $matched
-            Write-Host "WARN no unmatched candidate; will rely on existing auto mapping path"
-        } else {
-            $keep = Invoke-Json -Method POST `
-                -Url "$Base/api/sessions/$sid/candidates/$($needy.candidate_id)/confirm-mapping" `
-                -Body @{ pioneers_row_number = $needy.suggestions[0].row_number; save = $true }
-            $savedMappingKey = [string]$needy.supplier_name
-            if (-not $savedMappingKey) { $savedMappingKey = [string]$keep.supplier_name }
-            Write-Host "OK saved mapping for '$savedMappingKey'"
-        }
-    }
-
-    if (-not $keep) {
-        $keep = $candidates | Where-Object { $_.status -eq "MATCHED" } | Select-Object -First 1
-        if (-not $keep) {
-            $needy = $candidates | Where-Object {
-                $_.status -in @("UNMATCHED", "AMBIGUOUS") -and $_.suggestions -and $_.suggestions.Count -gt 0
-            } | Select-Object -First 1
-            if (-not $needy) { throw "No confirmable candidate found" }
-            $keep = Invoke-Json -Method POST `
-                -Url "$Base/api/sessions/$sid/candidates/$($needy.candidate_id)/confirm-mapping" `
-                -Body @{ pioneers_row_number = $needy.suggestions[0].row_number; save = $true }
-            if ($SaveMapping) {
-                $savedMappingKey = [string]$needy.supplier_name
-            }
-        }
+        $keep = Invoke-Json -Method POST `
+            -Url "$Base/api/sessions/$sid/candidates/$($keep.candidate_id)/confirm-mapping" `
+            -Body @{ pioneers_row_number = $keep.row_number; save = $true }
+        $savedMappingKey = [string]$keep.supplier_name
+        Write-Host "OK saved mapping for '$savedMappingKey'"
     }
 
     $approved = Invoke-Api -Method POST `
         -Url "$Base/api/sessions/$sid/candidates/$($keep.candidate_id)/review" `
         -Body @{ decision = "APPROVE" }
-    if ($ExpectBlocked) {
-        if ($approved.StatusCode -lt 400) {
-            throw "blocked $Label review was accepted (HTTP $($approved.StatusCode))"
-        }
-        $blockedExport = Invoke-Api -Method POST -Url "$Base/api/sessions/$sid/export"
-        if ($blockedExport.StatusCode -ne 400) {
-            throw "blocked $Label export expected HTTP 400, got $($blockedExport.StatusCode): $($blockedExport.Text)"
-        }
-        $blockedDownload = Invoke-Api -Method GET -Url "$Base/api/sessions/$sid/download"
-        if ($blockedDownload.StatusCode -ne 404) {
-            throw "blocked $Label download expected HTTP 404, got $($blockedDownload.StatusCode)"
-        }
-        $afterSha = Get-FileSha256 $ExcelPath
-        if ($afterSha -ne $sourceSha) {
-            throw "Source fixture was mutated during $Label workflow"
-        }
-        Write-Host "OK blocked export ($Label) review=$($approved.StatusCode) export=400"
-        return @{
-            SavedMappingKey = $savedMappingKey
-            Keep = $keep
-            OutPath = $null
-        }
-    }
     if ($approved.StatusCode -ne 200) {
         throw "$Label APPROVE failed HTTP $($approved.StatusCode): $($approved.Text)"
     }
-    if ($approved.Body.pricing_blockers -and @($approved.Body.pricing_blockers).Count -gt 0) {
-        throw "$Label approved a row that still has pricing blockers"
+    if (@($approved.Body.pricing_blockers).Count -ne 0 -or
+        $approved.Body.exportable -ne $true -or $approved.Body.review_decision -ne "APPROVE") {
+        throw "$Label approval did not produce an exportable row without pricing blockers: $($approved.Text)"
     }
+    $keep = $approved.Body
 
     foreach ($c in $candidates) {
         if ($c.candidate_id -eq $keep.candidate_id) { continue }
-        try {
-            Invoke-Json -Method POST `
-                -Url "$Base/api/sessions/$sid/candidates/$($c.candidate_id)/review" `
-                -Body @{ decision = "EXCLUDE" } | Out-Null
-        } catch {
-            # Some statuses cannot be excluded; ignore.
-        }
+        Invoke-Json -Method POST `
+            -Url "$Base/api/sessions/$sid/candidates/$($c.candidate_id)/review" `
+            -Body @{ decision = "EXCLUDE" } | Out-Null
     }
 
     $export = Invoke-Json -Method POST -Url "$Base/api/sessions/$sid/export"
-    if (-not $export.updated_count -or $export.updated_count -lt 1) {
-        throw "export updated_count expected >= 1"
+    if ($export.updated_count -ne 1 -or $export.exported_row_count -ne 1) {
+        throw "$Label export must contain exactly the one approved product"
     }
     Write-Host "OK export ($($export.updated_count) rows)"
 
@@ -414,6 +370,8 @@ function Invoke-Workflow {
     if ($HtmlXls) { $compareArgs += "--html-xls" }
     & $PythonExe @compareArgs
     if ($LASTEXITCODE -ne 0) { throw "compare_export failed for $Label" }
+    & $PythonExe $PriceCheckScript --exported $outXlsx --code $keep.pioneers_code --price $keep.new_price
+    if ($LASTEXITCODE -ne 0) { throw "approved product/price check failed for $Label" }
 
     return @{
         SavedMappingKey = $savedMappingKey
@@ -464,46 +422,34 @@ function Invoke-ConfirmedMetreExport {
     if ($confirmed.pricing_blockers -and @($confirmed.pricing_blockers).Count -gt 0) {
         throw "confirmed Dina metre row is still blocked: $($confirmed.pricing_blockers -join ' | ')"
     }
-    if (-not $confirmed.exportable) {
-        $approved = Invoke-Api -Method POST `
-            -Url "$Base/api/sessions/$sid/candidates/$($pipe.candidate_id)/review" `
-            -Body @{ decision = "APPROVE" }
-        if ($approved.StatusCode -ne 200 -or -not $approved.Body.exportable) {
-            throw "compatible Dina metre APPROVE failed HTTP $($approved.StatusCode): $($approved.Text)"
-        }
-        $confirmed = $approved.Body
+    if ($confirmed.source_currency -ne "rial" -or $confirmed.new_price -ne $pipe.new_price) {
+        throw "Dina metre mapping changed the printed Rial price"
     }
+    $approved = Invoke-Api -Method POST `
+        -Url "$Base/api/sessions/$sid/candidates/$($pipe.candidate_id)/review" `
+        -Body @{ decision = "APPROVE" }
+    if ($approved.StatusCode -ne 200 -or $approved.Body.exportable -ne $true -or
+        @($approved.Body.pricing_blockers).Count -ne 0) {
+        throw "compatible Dina metre APPROVE failed HTTP $($approved.StatusCode): $($approved.Text)"
+    }
+    $confirmed = $approved.Body
 
     foreach ($c in $match.candidates) {
         if ($c.candidate_id -eq $pipe.candidate_id) { continue }
-        try {
-            Invoke-Json -Method POST `
-                -Url "$Base/api/sessions/$sid/candidates/$($c.candidate_id)/review" `
-                -Body @{ decision = "EXCLUDE" } | Out-Null
-        } catch {
-            # Unmatched rows that cannot be excluded do not become exportable.
-        }
+        Invoke-Json -Method POST `
+            -Url "$Base/api/sessions/$sid/candidates/$($c.candidate_id)/review" `
+            -Body @{ decision = "EXCLUDE" } | Out-Null
     }
 
     $export = Invoke-Api -Method POST -Url "$Base/api/sessions/$sid/export"
-    if ($export.StatusCode -ne 200 -or $export.Body.updated_count -lt 1) {
+    if ($export.StatusCode -ne 200 -or $export.Body.updated_count -ne 1 -or
+        $export.Body.exported_row_count -ne 1) {
         throw "Dina metre export failed HTTP $($export.StatusCode): $($export.Text)"
     }
     $outXlsx = Join-Path $DataDir "smoke-out-dina-metre.xlsx"
     Invoke-WebRequest -Uri "$Base/api/sessions/$sid/download" -OutFile $outXlsx -UseBasicParsing -TimeoutSec 120
     $expected = [string]$confirmed.new_price
-    & $PythonExe -c @"
-from decimal import Decimal
-from openpyxl import load_workbook
-header = ''.join(chr(cp) for cp in (0x0646,0x0631,0x062E,0x0020,0x0641,0x0631,0x0648,0x0634,0x0020,0x0627,0x0635,0x0644,0x06CC))
-wb = load_workbook(r'$outXlsx')
-ws = wb.active
-headers = {cell.value: cell.column for cell in ws[1]}
-value = ws.cell($rowNumber, headers[header]).value
-wb.close()
-if Decimal(str(value)) != Decimal('$expected'):
-    raise SystemExit('sale cell %s != %s' % (value, '$expected'))
-"@
+    & $PythonExe $PriceCheckScript --exported $outXlsx --code $confirmed.pioneers_code --price $expected
     if ($LASTEXITCODE -ne 0) { throw "Dina metre sale cell was not the supplier price" }
 
     $compareArgs = @(
@@ -521,7 +467,74 @@ if Decimal(str(value)) != Decimal('$expected'):
     if (-not $saved.mappings -or @($saved.mappings).Count -lt 1) {
         throw "Dina mapping was not saved"
     }
-    Write-Host "OK Dina metre export row=$rowNumber price=$expected"
+    Write-Host "OK Dina metre export code=$($confirmed.pioneers_code) source_row=$rowNumber price=$expected"
+}
+
+function Invoke-BlockedPriceExport {
+    param([string]$ExcelPath)
+
+    $sourceSha = Get-FileSha256 $ExcelPath
+    $session = Invoke-Json -Method POST -Url "$Base/api/sessions"
+    $sid = $session.session_id
+    $null = Invoke-Multipart -Url "$Base/api/sessions/$sid/pioneers-excel" `
+        -FormFields @{} -FileField "file" -FilePath $ExcelPath `
+        -ContentType "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    $null = Invoke-Multipart -Url "$Base/api/sessions/$sid/supplier-pdf" `
+        -FormFields @{ supplier_key = "dina_polymer" } `
+        -FileField "file" -FilePath $DinaPdf -ContentType "application/pdf"
+    $match = Invoke-Json -Method POST -Url "$Base/api/sessions/$sid/match" -Body @{}
+    # Real fixture collision: distinct drip-product codes share a descriptor.
+    # Mapping/APPROVE must never bypass that hard supplier restriction.
+    $blocked = $match.candidates | Where-Object {
+        $_.supplier_code -eq "825952020" -and $_.new_price -eq "198440"
+    } | Select-Object -First 1
+    if (-not $blocked -or $blocked.exportable -or
+        -not ($blocked.pricing_blockers -match "shared by products")) {
+        throw "expected Dina 825952020 to have the genuine shared-product pricing blocker"
+    }
+    $query = [uri]::EscapeDataString((-join @([char]0x0644, [char]0x0648, [char]0x0644, [char]0x0647)))
+    $search = Invoke-Json -Method GET -Url "$Base/api/sessions/$sid/pioneers-products/search?q=$query"
+    if (-not $search.results) { throw "no Pioneers target for blocked-price mapping test" }
+    $confirmed = Invoke-Json -Method POST `
+        -Url "$Base/api/sessions/$sid/candidates/$($blocked.candidate_id)/confirm-mapping" `
+        -Body @{ pioneers_row_number = $search.results[0].row_number; save = $true }
+    if ($confirmed.status -ne "MATCHED" -or $confirmed.exportable -or
+        -not ($confirmed.pricing_blockers -match "shared by products")) {
+        throw "mapping confirmation cleared the genuine supplier price restriction"
+    }
+    $review = Invoke-Api -Method POST `
+        -Url "$Base/api/sessions/$sid/candidates/$($blocked.candidate_id)/review" `
+        -Body @{ decision = "APPROVE" }
+    if ($review.StatusCode -ne 400 -or $review.Body.detail -notmatch "supplier price restriction is unresolved") {
+        throw "blocked price APPROVE expected restriction HTTP 400, got $($review.StatusCode): $($review.Text)"
+    }
+    # Leave the blocked candidate in place; exclude every other row so the
+    # rejection proves this matched price cannot produce an export.
+    foreach ($c in $match.candidates) {
+        if ($c.candidate_id -eq $blocked.candidate_id) { continue }
+        Invoke-Json -Method POST `
+            -Url "$Base/api/sessions/$sid/candidates/$($c.candidate_id)/review" `
+            -Body @{ decision = "EXCLUDE" } | Out-Null
+    }
+    $preview = Invoke-Json -Method GET -Url "$Base/api/sessions/$sid/candidates"
+    $stillBlocked = $preview.candidates | Where-Object { $_.candidate_id -eq $blocked.candidate_id } | Select-Object -First 1
+    if (-not $stillBlocked -or $stillBlocked.exportable -or
+        -not ($stillBlocked.pricing_blockers -match "shared by products") -or
+        @($preview.candidates | Where-Object { $_.exportable }).Count -ne 0) {
+        throw "blocked candidate became eligible after rejected approval"
+    }
+    $export = Invoke-Api -Method POST -Url "$Base/api/sessions/$sid/export"
+    if ($export.StatusCode -ne 400 -or $export.Body.detail -notmatch "no approved updates available for export") {
+        throw "blocked export expected no-approved-updates HTTP 400, got $($export.StatusCode): $($export.Text)"
+    }
+    $download = Invoke-Api -Method GET -Url "$Base/api/sessions/$sid/download"
+    if ($download.StatusCode -ne 404) {
+        throw "blocked price download expected HTTP 404, got $($download.StatusCode)"
+    }
+    if ((Get-FileSha256 $ExcelPath) -ne $sourceSha) {
+        throw "Source fixture was mutated during blocked-price workflow"
+    }
+    Write-Host "OK genuine price restriction survives mapping; approval=400 export=400 download=404"
 }
 
 $smokeFailed = $false
@@ -562,9 +575,10 @@ try {
     }
     Write-Host "OK foreign Host rejected on GET /api/settings"
 
-    $null = Invoke-Workflow -ExcelPath $ExcelXlsx -Label "xlsx" -SaveMapping -ExpectBlocked
-    $null = Invoke-Workflow -ExcelPath $ExcelXls -Label "xls" -HtmlXls -ExpectBlocked
+    $null = Invoke-Workflow -ExcelPath $ExcelXlsx -Label "xlsx" -SaveMapping
+    $null = Invoke-Workflow -ExcelPath $ExcelXls -Label "xls" -HtmlXls
     Invoke-ConfirmedMetreExport -ExcelPath $ExcelXlsx
+    Invoke-BlockedPriceExport -ExcelPath $ExcelXlsx
 
     $mappingsBefore = Invoke-Json -Method GET -Url "$Base/api/suppliers/azin_pipe/mappings"
     if (-not $mappingsBefore.mappings -or $mappingsBefore.mappings.Count -lt 1) {
@@ -619,4 +633,4 @@ if ($smokeFailed) {
     throw "Packaged smoke test failed"
 }
 
-Write-Host "Packaged smoke test passed (blocked Azin export + Dina metre export + mapping restart)."
+Write-Host "Packaged smoke test passed (Azin XLSX/XLS + Dina metre approved-only exports + blocked price + mapping restart)."
