@@ -4,14 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 from uuid import uuid4
 
 from gheymatyar.domain.enums import MappingType, MatchStatus, ReviewDecision
 from gheymatyar.domain.product import PioneersProduct
 from gheymatyar.domain.supplier_item import SupplierPriceItem
 from gheymatyar.domain.update_candidate import UpdateCandidate
-from gheymatyar.services.name_normalization import name_similarity, normalize_product_name
+from gheymatyar.services.name_normalization import (
+    name_similarity,
+    normalize_product_name,
+    tokenize_normalized_name,
+)
 from gheymatyar.services.price_validation import apply_sale_compatibility
 from gheymatyar.services.product_identity import supplier_product_identity
 from gheymatyar.suppliers.base import BaseSupplierProcessor
@@ -65,16 +69,47 @@ def _index_by_normalized_name(
     return index
 
 
+def _name_tokens(name: str) -> frozenset[str]:
+    """The token set ``name_similarity`` compares for ``name``."""
+    return tokenize_normalized_name(normalize_product_name(name))
+
+
+def _product_name_tokens(
+    products: Sequence[PioneersProduct],
+) -> dict[str, frozenset[str]]:
+    """Tokens for every Pioneers name, built once per matching run.
+
+    Normalizing each Pioneers name again for every supplier item made fuzzy
+    suggestions the slowest part of matching on a full catalog.
+    """
+    tokens: dict[str, frozenset[str]] = {}
+    for product in products:
+        if product.name not in tokens:
+            tokens[product.name] = _name_tokens(product.name)
+    return tokens
+
+
+def _token_similarity(ta: frozenset[str], tb: frozenset[str]) -> float:
+    """Jaccard similarity of two token sets, exactly as ``name_similarity``."""
+    if not ta or not tb:
+        return 0.0
+    inter = len(ta & tb)
+    union = len(ta | tb)
+    return inter / union if union else 0.0
+
+
 def _suggestion_payloads(
     supplier_name: str,
     products: Sequence[PioneersProduct],
     *,
+    product_tokens: Mapping[str, frozenset[str]],
     limit: int = 5,
     min_score: float = 0.35,
 ) -> list[dict[str, object]]:
+    supplier_tokens = _name_tokens(supplier_name)
     scored: list[tuple[float, PioneersProduct]] = []
     for product in products:
-        score = name_similarity(supplier_name, product.name)
+        score = _token_similarity(supplier_tokens, product_tokens[product.name])
         if score >= min_score:
             scored.append((score, product))
     scored.sort(key=lambda pair: (-pair[0], pair[1].name))
@@ -279,6 +314,7 @@ def match_supplier_items(
         name_counts[normalized] = name_counts.get(normalized, 0) + 1
     ignored = {key for key in ignored_identities if key}
     collisions = _colliding_names(items, processor)
+    product_tokens = _product_name_tokens(products)
 
     result = MatchResult()
 
@@ -328,6 +364,7 @@ def match_supplier_items(
                     raw_supplier_name,
                     products,
                     suggestion_pool_limit,
+                    product_tokens=product_tokens,
                 )
                 for suggestion in extra:
                     row_number = suggestion.get("row_number")
@@ -375,6 +412,7 @@ def match_supplier_items(
                     raw_supplier_name,
                     products,
                     suggestion_pool_limit,
+                    product_tokens=product_tokens,
                 )
                 result.candidates.append(
                     UpdateCandidate(
@@ -438,6 +476,7 @@ def match_supplier_items(
                 raw_supplier_name,
                 products,
                 suggestion_pool_limit,
+                product_tokens=product_tokens,
             )
             result.candidates.append(
                 UpdateCandidate(
@@ -536,7 +575,10 @@ def match_supplier_items(
 
         # 3) Fuzzy suggestions only — never auto-confirm
         suggestions = _suggestion_payloads(
-            raw_supplier_name, products, limit=suggestion_pool_limit
+            raw_supplier_name,
+            products,
+            product_tokens=product_tokens,
+            limit=suggestion_pool_limit,
         )
         status = MatchStatus.AMBIGUOUS if suggestions else MatchStatus.UNMATCHED
         result.candidates.append(
@@ -586,6 +628,8 @@ def _remap_suggestions(
     supplier_name: str,
     products: Sequence[PioneersProduct],
     limit: int,
+    *,
+    product_tokens: Mapping[str, frozenset[str]],
 ) -> tuple[MatchStatus, list[dict[str, object]]]:
     """Suggestions for a saved mapping that must be confirmed again.
 
@@ -606,7 +650,9 @@ def _remap_suggestions(
     for product in by_name.get(saved.pioneers_name_normalized, []):
         add(product, 1.0)
     if not suggestions:
-        for payload in _suggestion_payloads(supplier_name, products, limit=limit):
+        for payload in _suggestion_payloads(
+            supplier_name, products, product_tokens=product_tokens, limit=limit
+        ):
             suggestions.append(payload)
     status = MatchStatus.AMBIGUOUS if suggestions else MatchStatus.UNMATCHED
     return status, suggestions

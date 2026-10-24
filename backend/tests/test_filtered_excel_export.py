@@ -106,17 +106,24 @@ def _expand_real_catalog(destination: Path) -> list[dict[str, object]]:
     try:
         sheet = workbook[PRODUCT_SHEET_NAME]
         assert sheet.max_row >= INPUT_ROWS + 1
+        # One forward pass: in read-only mode every sheet.cell() call parses
+        # the sheet XML again from the top.
+        wanted = set(APPROVED_SOURCE_ROWS)
+        saved_rows: dict[int, tuple[object, ...]] = {}
+        for row_number, values in enumerate(
+            sheet.iter_rows(max_col=40, values_only=True), start=1
+        ):
+            if row_number in wanted:
+                saved_rows[row_number] = values
         for row_number in APPROVED_SOURCE_ROWS:
+            values = saved_rows[row_number]
             selected.append(
                 {
                     "row_number": row_number,
-                    "pioneers_code": str(sheet.cell(row_number, code_col).value),
-                    "pioneers_name": str(sheet.cell(row_number, name_col).value),
-                    "old_price": str(sheet.cell(row_number, sale_col).value),
-                    "values": [
-                        sheet.cell(row_number, column).value
-                        for column in range(1, 41)
-                    ],
+                    "pioneers_code": str(values[code_col - 1]),
+                    "pioneers_name": str(values[name_col - 1]),
+                    "old_price": str(values[sale_col - 1]),
+                    "values": list(values),
                 }
             )
     finally:
