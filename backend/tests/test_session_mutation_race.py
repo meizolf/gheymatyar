@@ -9,6 +9,20 @@ from openpyxl import load_workbook
 from tests.confirmed_metre import prepare_two_exportable_metre_rows
 
 
+def _product_codes(path: Path) -> set[str]:
+    wb = load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+    headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    code_idx = headers.index("کد کالا")
+    codes = {
+        str(row[code_idx])
+        for row in ws.iter_rows(min_row=2, values_only=True)
+        if row[code_idx] not in (None, "")
+    }
+    wb.close()
+    return codes
+
+
 def _sale_price_at(path: Path, row_number: int) -> str:
     wb = load_workbook(path, read_only=True, data_only=True)
     ws = wb.active
@@ -46,12 +60,8 @@ def test_order_exclude_then_export_omits_excluded_row(
     out = tmp_path / "exclude_then_export.xlsx"
     out.write_bytes(download.content)
 
-    assert _sale_price_at(out, keep["row_number"]) == str(keep["new_price"]).replace(
-        ",", ""
-    )
-    assert _sale_price_at(out, drop["row_number"]) == str(drop["old_price"]).replace(
-        ",", ""
-    )
+    assert _sale_price_at(out, 2) == str(keep["new_price"]).replace(",", "")
+    assert _product_codes(out) == {str(keep["pioneers_code"])}
 
 
 def test_order_export_then_exclude_invalidates_stale_download(
@@ -92,9 +102,5 @@ def test_order_export_then_exclude_invalidates_stale_download(
     assert download2.status_code == 200
     second = tmp_path / "export_after_exclude.xlsx"
     second.write_bytes(download2.content)
-    assert _sale_price_at(second, keep["row_number"]) == str(keep["new_price"]).replace(
-        ",", ""
-    )
-    assert _sale_price_at(second, drop["row_number"]) == str(drop["old_price"]).replace(
-        ",", ""
-    )
+    assert _sale_price_at(second, 2) == str(keep["new_price"]).replace(",", "")
+    assert _product_codes(second) == {str(keep["pioneers_code"])}

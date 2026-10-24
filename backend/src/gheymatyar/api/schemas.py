@@ -150,6 +150,7 @@ class ExportResponse(BaseModel):
     session_id: str
     output_filename: str
     updated_count: int
+    exported_row_count: int
     download_path: str
 
 

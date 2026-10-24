@@ -1,4 +1,8 @@
-"""Build a workbook export that is allowed only after an explicit Rial per-metre confirmation."""
+"""Build a workbook with two exportable Dina per-metre rows.
+
+Pioneers sale prices are always Rial. A workbook without a unit column does
+not need a price-basis setting; the printed Rial amount is used as-is.
+"""
 
 from __future__ import annotations
 
@@ -14,19 +18,6 @@ from gheymatyar.suppliers.dina_polymer import DinaPolymerProcessor
 METRE_CODES = ("825331050", "825332050")
 
 
-def enable_rial_per_metre(client: TestClient) -> None:
-    response = client.put(
-        "/api/settings",
-        json={
-            "settings": {
-                "pioneers_sale_currency": "rial",
-                "pioneers_sale_basis": "meter",
-            }
-        },
-    )
-    assert response.status_code == 200, response.text
-
-
 def metre_items(dina_pdf: Path):
     parsed = DinaPolymerProcessor().parse_pdf(dina_pdf)
     by_code = {item.supplier_code: item for item in parsed.items}
@@ -39,8 +30,7 @@ def prepare_two_exportable_metre_rows(
     dina_pdf: Path,
     tmp_path: Path,
 ) -> tuple[str, dict, dict]:
-    """Two Dina per-metre rows, after an explicit Rial per-metre confirmation."""
-    enable_rial_per_metre(client)
+    """Two Dina per-metre rows on a workbook that has no unit column."""
     items = metre_items(dina_pdf)
     edited = tmp_path / "named.xlsx"
     workbook_with_supplier_names(

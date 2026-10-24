@@ -27,11 +27,7 @@ def test_session_lock_serializes_exclude_before_export_snapshot(
     session = service.get_session(session.session_id)
     session.supplier_key = "azin_pipe"
     session.supplier_confirmed = True
-    session.metadata["pioneers_sale_currency"] = "rial"
-    session.metadata["pioneers_sale_basis"] = "piece"
     # Seed two matched exportable candidates pointing at real product rows.
-    # The workbook itself has no unit column; this test states an explicit
-    # per-piece Rial confirmation so the lock behaviour can still export.
     products = session.products[:2]
     assert len(products) == 2
     candidates = []
@@ -61,7 +57,6 @@ def test_session_lock_serializes_exclude_before_export_snapshot(
     session.candidates = candidates
     session.matched_count = 2
     keep_id, drop_id = candidates[0].candidate_id, candidates[1].candidate_id
-    drop_old = str(candidates[1].old_price)
 
     order: list[str] = []
     errors: list[BaseException] = []
@@ -105,7 +100,6 @@ def test_session_lock_serializes_exclude_before_export_snapshot(
     assert order.index("exclude-enter") < order.index("export-done")
     assert order.index("exclude-done") < order.index("export-done")
 
-    # Workbook must keep old price for excluded row.
     from openpyxl import load_workbook
 
     out = service.get_session(session.session_id).output_path
@@ -114,12 +108,11 @@ def test_session_lock_serializes_exclude_before_export_snapshot(
     ws = wb.active
     headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
     sale_idx = headers.index("نرخ فروش اصلی")
-    drop_row_number = candidates[1].row_number
-    assert drop_row_number is not None
-    vals = [
-        c.value
-        for c in next(ws.iter_rows(min_row=drop_row_number, max_row=drop_row_number))
-    ]
-    assert str(vals[sale_idx]).replace(",", "") == drop_old.replace(",", "")
+    code_idx = headers.index("کد کالا")
+    rows = list(ws.iter_rows(min_row=2, values_only=True))
     wb.close()
+    assert len(rows) == 1
+    assert str(rows[0][code_idx]) == str(candidates[0].pioneers_code)
+    assert str(rows[0][sale_idx]).replace(",", "") == str(candidates[0].new_price)
+    assert str(candidates[1].pioneers_code) not in {str(row[code_idx]) for row in rows}
     assert keep_id  # silence unused if linted

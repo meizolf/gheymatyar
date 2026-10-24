@@ -416,10 +416,18 @@ def export_excel(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result.exported_row_count != result.updated_count:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "exported product row count does not match the approved selection"
+            ),
+        )
     return ExportResponse(
         session_id=session_id,
         output_filename=Path(result.output_path).name,
         updated_count=result.updated_count,
+        exported_row_count=result.exported_row_count,
         download_path=f"/api/sessions/{session_id}/download",
     )
 

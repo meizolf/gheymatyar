@@ -57,6 +57,14 @@ class BaseSupplierProcessor(ABC):
         """Optional alternate names used only as suggestion seeds."""
         return ()
 
+    def prior_normalized_names(self, item: SupplierPriceItem) -> Sequence[str]:
+        """Earlier normalized names for this same code and unit.
+
+        Used only to keep a saved mapping or ignore after a name formula
+        changes. The result is never a code-only lookup.
+        """
+        return ()
+
     def detection_rules(self) -> DetectionRules:
         """Content markers used by :class:`SupplierDetector`.
 

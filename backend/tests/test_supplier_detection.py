@@ -29,6 +29,7 @@ def detector() -> SupplierDetector:
         ("dina_pdf", "dina_polymer", Confidence.HIGH),
         ("newpipe_pdf", "newpipe", Confidence.HIGH),
         ("abrahan_pdf", "abrahan_pipe", Confidence.HIGH),
+        ("kian_pdf", "kian", Confidence.HIGH),
     ],
 )
 def test_detects_each_registered_supplier(

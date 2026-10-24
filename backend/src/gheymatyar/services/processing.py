@@ -13,11 +13,6 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from gheymatyar.domain.enums import MappingType, MatchStatus, ReviewDecision
-from gheymatyar.domain.sale_policy import (
-    PIONEERS_SALE_CURRENCY,
-    SETTING_SALE_BASIS_KEY,
-    SETTING_SALE_CURRENCY_KEY,
-)
 from gheymatyar.domain.update_candidate import UpdateCandidate
 from gheymatyar.parsers.pioneers_excel_parser import PioneersExcelParser
 from gheymatyar.parsers.pioneers_html_xls import convert_pioneers_html_xls_to_xlsx
@@ -34,6 +29,7 @@ from gheymatyar.repositories.settings_repository import SettingsRepository
 from gheymatyar.repositories.supplier_repository import SupplierRepository
 from gheymatyar.services.matching import (
     SavedNameMapping,
+    item_decision_identities,
     match_supplier_items,
     search_pioneers_products,
 )
@@ -48,9 +44,9 @@ from gheymatyar.services.price_validation import (
     IDENTITY_CONFLICT_WARNING,
     apply_price_warnings,
     apply_sale_compatibility,
+    assemble_export_updates,
     is_exportable,
     resolve_suspicious_percent_threshold,
-    to_final_sale_updates,
 )
 from gheymatyar.services.session_store import ProcessingSession, SessionStore
 from gheymatyar.suppliers.errors import UnsupportedSupplierError
@@ -60,43 +56,8 @@ _SAFE_FILENAME_RE = re.compile(r"[^\w.\-()+ \u0600-\u06FF]+", re.UNICODE)
 SETTING_THRESHOLD_KEY = "suspicious_percent_threshold"
 
 
-def _setting_text(db_session: Session, key: str) -> str | None:
-    row = SettingsRepository(db_session).get(key)
-    if row is None:
-        return None
-    text = str(row.value).strip()
-    return text or None
-
-
-def _stored_sale_policy(db_session: Session) -> tuple[str | None, str | None]:
-    """Return the active sale policy.
-
-    Currency falls back to the confirmed Rial default when the setting row has
-    never been written. An explicitly cleared (empty) value stays unconfirmed.
-    """
-    currency_row = SettingsRepository(db_session).get(SETTING_SALE_CURRENCY_KEY)
-    if currency_row is None:
-        currency: str | None = PIONEERS_SALE_CURRENCY
-    else:
-        currency = str(currency_row.value).strip() or None
-    return currency, _setting_text(db_session, SETTING_SALE_BASIS_KEY)
-
-
-def _remember_sale_policy(
-    session: ProcessingSession, currency: str | None, basis: str | None
-) -> None:
-    session.metadata["pioneers_sale_currency"] = currency or ""
-    session.metadata["pioneers_sale_basis"] = basis or ""
-
-
-def _policy_from_session(session: ProcessingSession) -> tuple[str | None, str | None]:
-    currency = str(session.metadata.get("pioneers_sale_currency") or "").strip()
-    basis = str(session.metadata.get("pioneers_sale_basis") or "").strip()
-    return currency or None, basis or None
-
-
 def _refresh_sale_compatibility(session: ProcessingSession) -> list[UpdateCandidate]:
-    currency, basis = _policy_from_session(session)
+    """Re-apply the fixed Rial sale rules. There is no currency or basis setting."""
     by_row = {product.row_number: product for product in session.products}
     refreshed: list[UpdateCandidate] = []
     for candidate in session.candidates:
@@ -105,8 +66,6 @@ def _refresh_sale_compatibility(session: ProcessingSession) -> list[UpdateCandid
             candidate = apply_sale_compatibility(
                 candidate,
                 target_unit=product.unit,
-                confirmed_currency=currency,
-                confirmed_basis=basis,
             )
         refreshed.append(candidate)
     return refreshed
@@ -215,6 +174,37 @@ def _candidate_identity(processor, candidate: UpdateCandidate) -> str:
         supplier_code=candidate.supplier_code,
         unit=candidate.source_unit,
     )
+
+
+def _decision_names(processor, session: ProcessingSession, candidate: UpdateCandidate) -> list[str]:
+    """Current normalized name plus prior names of this same code and unit."""
+    names = [processor.normalize_supplier_name(candidate.supplier_name)]
+    for item in session.supplier_items:
+        if item.supplier_name != candidate.supplier_name:
+            continue
+        if (item.supplier_code or None) != (candidate.supplier_code or None):
+            continue
+        if (item.unit or None) != (candidate.source_unit or None):
+            continue
+        for name in processor.prior_normalized_names(item):
+            if name and name not in names:
+                names.append(name)
+        break
+    return names
+
+
+def _candidate_decision_identities(
+    processor, session: ProcessingSession, candidate: UpdateCandidate
+) -> list[str]:
+    for item in session.supplier_items:
+        if item.supplier_name != candidate.supplier_name:
+            continue
+        if (item.supplier_code or None) != (candidate.supplier_code or None):
+            continue
+        if (item.unit or None) != (candidate.source_unit or None):
+            continue
+        return item_decision_identities(processor, item)
+    return [_candidate_identity(processor, candidate)]
 
 
 def _mapping_basis_token(record: ProductMappingRecord | None) -> str:
@@ -608,12 +598,9 @@ class ProcessingService:
                 source_unit=candidate.source_unit,
                 suggestions=[],
             )
-            sale_currency, sale_basis = _stored_sale_policy(db_session)
             updated = apply_sale_compatibility(
                 updated,
                 target_unit=product.unit,
-                confirmed_currency=sale_currency,
-                confirmed_basis=sale_basis,
             )
             threshold = resolve_suspicious_percent_threshold(
                 request_value=session.metadata.get("suspicious_percent_threshold"),
@@ -639,7 +626,6 @@ class ProcessingService:
                     mapping_type=MappingType.MANUAL,
                 )
                 commit_or_raise(db_session)
-            _remember_sale_policy(session, sale_currency, sale_basis)
             session.replace_candidate(updated)
             self._recount(session)
             self._remember_manual_basis(session, db_session, processor, updated)
@@ -703,15 +689,15 @@ class ProcessingService:
                 raise KeyError(candidate_id)
             processor, supplier_row = self._require_supplier(session, db_session)
             identity = _candidate_identity(processor, candidate)
-            ProductDecisionRepository(db_session).restore(
-                supplier_id=supplier_row.id,
-                supplier_name_raw=candidate.supplier_name,
-                supplier_name_normalized=processor.normalize_supplier_name(
-                    candidate.supplier_name
-                ),
-                supplier_code=candidate.supplier_code,
-                unit=candidate.source_unit,
-            )
+            decisions = ProductDecisionRepository(db_session)
+            for name in _decision_names(processor, session, candidate):
+                decisions.restore(
+                    supplier_id=supplier_row.id,
+                    supplier_name_raw=candidate.supplier_name,
+                    supplier_name_normalized=name,
+                    supplier_code=candidate.supplier_code,
+                    unit=candidate.source_unit,
+                )
             commit_or_raise(db_session)
             ignored = ProductDecisionRepository(db_session).ignored_identity_keys(
                 supplier_row.id
@@ -799,43 +785,6 @@ class ProcessingService:
             session.replace_candidate(updated)
             _invalidate_export(session)
             return updated
-
-    def revalidate_open_sessions(self, db_session: Session) -> None:
-        """Apply the saved sale policy to every open session and drop old workbooks.
-
-        Approvals made under the previous confirmation do not carry forward.
-        """
-        currency, basis = _stored_sale_policy(db_session)
-        for session in self._store.snapshot():
-            with self._store.session_lock(session.session_id):
-                current = self._store.get(session.session_id)
-                if current is None:
-                    continue
-                _remember_sale_policy(current, currency, basis)
-                if current.candidates:
-                    reset: list[UpdateCandidate] = []
-                    for candidate in current.candidates:
-                        if candidate.review_decision in {
-                            ReviewDecision.APPROVE,
-                            ReviewDecision.INCLUDE,
-                        }:
-                            candidate = candidate.model_copy(
-                                update={"review_decision": ReviewDecision.EXCLUDE}
-                            )
-                        reset.append(candidate)
-                    current.candidates = reset
-                    current.candidates = apply_price_warnings(
-                        _refresh_sale_compatibility(current),
-                        suspicious_percent_threshold=resolve_suspicious_percent_threshold(
-                            request_value=current.metadata.get(
-                                "suspicious_percent_threshold"
-                            ),
-                            default=DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
-                        ),
-                        conflicted_row_numbers=current.conflicted_row_numbers,
-                    )
-                    self._apply_saved_ignores_unlocked(current, db_session)
-                _invalidate_export(current)
 
     def export_excel(
         self, session_id: str, db_session: Session | None = None
@@ -996,7 +945,6 @@ class ProcessingService:
         assert session.work_dir is not None
 
         if db_session is not None:
-            _remember_sale_policy(session, *_stored_sale_policy(db_session))
             self._reconcile_saved_decisions(session, db_session)
             self._apply_saved_ignores_unlocked(session, db_session)
         fingerprint_before = (
@@ -1016,7 +964,7 @@ class ProcessingService:
         )
         session.candidates = guarded
 
-        updates = to_final_sale_updates(session.candidates)
+        updates = assemble_export_updates(session.candidates)
         if not updates:
             _invalidate_export(session)
             raise ValueError("no approved updates available for export")
@@ -1101,16 +1049,12 @@ class ProcessingService:
             )
             for row in MappingRepository(db_session).list_for_supplier(supplier_id)
         ]
-        sale_currency, sale_basis = _stored_sale_policy(db_session)
-        _remember_sale_policy(session, sale_currency, sale_basis)
         match_result = match_supplier_items(
             session.supplier_items,
             session.products,
             processor=processor,
             saved_mappings=saved,
             ignored_identities=ignored_identities,
-            confirmed_sale_currency=sale_currency,
-            confirmed_sale_basis=sale_basis,
         )
         saved_setting = SettingsRepository(db_session).get(SETTING_THRESHOLD_KEY)
         threshold = resolve_suspicious_percent_threshold(
@@ -1141,9 +1085,10 @@ class ProcessingService:
         supplier = self._find_supplier_row(db_session, processor)
         if supplier is None:
             return False
-        identity = _candidate_identity(processor, candidate)
-        return identity in ProductDecisionRepository(db_session).ignored_identity_keys(
-            supplier.id
+        ignored = ProductDecisionRepository(db_session).ignored_identity_keys(supplier.id)
+        return any(
+            ident in ignored
+            for ident in _candidate_decision_identities(processor, session, candidate)
         )
 
     def _apply_saved_ignores_unlocked(
@@ -1165,7 +1110,12 @@ class ProcessingService:
             return
         changed = False
         for candidate in list(session.candidates):
-            if _candidate_identity(processor, candidate) not in ignored:
+            if not any(
+                ident in ignored
+                for ident in _candidate_decision_identities(
+                    processor, session, candidate
+                )
+            ):
                 continue
             marked = _as_ignored(candidate)
             if marked is not candidate:

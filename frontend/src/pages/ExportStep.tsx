@@ -52,6 +52,12 @@ export function ExportStep() {
       try {
         return await enqueueSessionOp(async () => {
           const result = await api.exportExcel(sessionId!)
+          if (
+            result.exported_row_count !== result.updated_count ||
+            result.exported_row_count < 1
+          ) {
+            throw new Error('count-mismatch')
+          }
           const blob = await api.downloadExcel(sessionId!)
           return { result, blob }
         })
@@ -62,7 +68,7 @@ export function ExportStep() {
     onSuccess: async ({ result, blob }) => {
       triggerDownload(blob, result.output_filename)
       setMessage(
-        `${result.updated_count} ردیف به‌روز شد و فایل «${result.output_filename}» دانلود شد.`,
+        `${result.exported_row_count} ردیف محصول در فایل «${result.output_filename}» ذخیره و دانلود شد.`,
       )
       setError(null)
       if (sessionId) {
@@ -77,6 +83,13 @@ export function ExportStep() {
       if (err instanceof Error && err.message === 'pending-ops') {
         setError(
           'هنوز تصمیم‌هایی در حال ثبت است. پس از اتمام، دوباره خروجی بگیرید.',
+        )
+        setMessage(null)
+        return
+      }
+      if (err instanceof Error && err.message === 'count-mismatch') {
+        setError(
+          'تعداد ردیف‌های فایل خروجی با انتخاب تأییدشده یکی نیست. فایل دانلود نشد.',
         )
         setMessage(null)
         return
@@ -120,9 +133,10 @@ export function ExportStep() {
     <section className="panel">
       <h1>تولید فایل اکسل</h1>
       <p className="lede">
-        فقط ستون <strong>نرخ فروش اصلی</strong> در فایل خروجی تغییر می‌کند. فایل
-        اکسل اصلی شما دست‌نخورده باقی می‌ماند. هیچ واردکردنی به نرم‌افزار پایونیرز
-        به‌صورت خودکار انجام نمی‌شود.
+        فایل خروجی فقط محصولات تأییدشده را دارد. در هر ردیف فقط ستون{' '}
+        <strong>نرخ فروش اصلی</strong> تغییر می‌کند. فایل اکسل اصلی شما
+        دست‌نخورده باقی می‌ماند. هیچ واردکردنی به نرم‌افزار پایونیرز به‌صورت
+        خودکار انجام نمی‌شود.
       </p>
 
       <div className="summary-box">
@@ -176,7 +190,7 @@ export function ExportStep() {
           onClick={() => {
             if (
               !window.confirm(
-                'فایل اکسل جدید تولید شود؟ فقط نرخ فروش اصلی به‌روز می‌شود.',
+                'فایل اکسل جدید فقط با محصولات تأییدشده تولید شود؟ در هر ردیف فقط نرخ فروش اصلی به‌روز می‌شود.',
               )
             ) {
               return

@@ -31,8 +31,6 @@ describe('SettingsPage', () => {
     vi.mocked(api.getSettings).mockResolvedValue({
       settings: {
         suspicious_percent_threshold: '30',
-        pioneers_sale_currency: 'rial',
-        pioneers_sale_basis: '',
       },
     })
   })
@@ -42,21 +40,19 @@ describe('SettingsPage', () => {
     vi.mocked(api.updateSettings).mockResolvedValue({
       settings: {
         suspicious_percent_threshold: '25',
-        pioneers_sale_currency: 'rial',
-        pioneers_sale_basis: '',
       },
     })
     const { client } = renderSettings()
     const input = await screen.findByLabelText(/آستانه هشدار/)
     expect(input).toHaveValue('30')
+    expect(screen.queryByLabelText(/ارز نرخ فروش/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/مبنای نرخ فروش/)).not.toBeInTheDocument()
     await user.clear(input)
     await user.type(input, '25')
     await user.click(screen.getByRole('button', { name: 'ذخیره' }))
     await waitFor(() => {
       expect(api.updateSettings).toHaveBeenCalledWith({
         suspicious_percent_threshold: '25',
-        pioneers_sale_currency: 'rial',
-        pioneers_sale_basis: '',
       })
     })
     expect(await screen.findByText(/تنظیمات ذخیره شد/)).toBeInTheDocument()

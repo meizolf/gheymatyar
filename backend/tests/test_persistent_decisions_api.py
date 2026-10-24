@@ -129,16 +129,15 @@ def test_ignore_matched_and_unmatched_persists_and_skips_export(
     sheet = workbook.active
     headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
     sale_idx = headers.index("نرخ فروش اصلی")
-    drop_row = [
-        cell.value
-        for cell in next(
-            sheet.iter_rows(min_row=drop["row_number"], max_row=drop["row_number"])
-        )
-    ]
-    assert str(drop_row[sale_idx]).replace(",", "") == str(drop["old_price"]).replace(
+    code_idx = headers.index("کد کالا")
+    rows = list(sheet.iter_rows(min_row=2, values_only=True))
+    workbook.close()
+    assert len(rows) == 1
+    assert str(rows[0][code_idx]) == str(keep["pioneers_code"])
+    assert str(rows[0][sale_idx]).replace(",", "") == str(keep["new_price"]).replace(
         ",", ""
     )
-    workbook.close()
+    assert str(drop["pioneers_code"]) not in {str(row[code_idx]) for row in rows}
 
     with client.app.state.database.session() as db:
         suppliers = SupplierRepository(db).list_all()

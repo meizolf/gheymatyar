@@ -47,7 +47,7 @@ def test_metre_price_is_not_exportable_for_a_branch_unit(dina_pdf) -> None:
     assert is_exportable(approved) is False
 
 
-def test_real_workbook_without_a_unit_column_stays_unresolved(
+def test_real_workbook_without_a_unit_column_uses_the_printed_rial_amount(
     dina_pdf, pioneers_azin_excel
 ) -> None:
     parsed = PioneersExcelParser().parse(pioneers_azin_excel)
@@ -55,20 +55,16 @@ def test_real_workbook_without_a_unit_column_stays_unresolved(
     assert all(product.unit is None for product in parsed.products)
     item = _pipe(dina_pdf)
     target = parsed.products[0].model_copy(update={"name": item.supplier_name})
-    # Currency defaults to Rial when unset; metre basis still required for Dina pipes.
     matched = match_supplier_items(
         [item],
         [target],
         processor=DinaPolymerProcessor(),
-        confirmed_sale_currency="rial",
     )
     enriched = apply_price_warnings(matched.candidates)
     candidate = enriched[0]
     assert candidate.new_price == item.price
-    assert any(
-        "not on the workbook" in blocker for blocker in candidate.pricing_blockers
-    )
-    assert is_exportable(candidate) is False
+    assert candidate.new_price != item.price * 6
+    assert candidate.pricing_blockers == []
 
 
 def test_matching_metre_units_do_not_multiply_the_price(dina_pdf) -> None:
@@ -84,7 +80,6 @@ def test_matching_metre_units_do_not_multiply_the_price(dina_pdf) -> None:
         [item],
         [product],
         processor=DinaPolymerProcessor(),
-        confirmed_sale_currency="rial",
     )
     candidate = apply_price_warnings(matched.candidates)[0]
     assert candidate.pricing_blockers == []

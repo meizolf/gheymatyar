@@ -157,7 +157,9 @@ def test_product_sheet_detected_by_headers_not_title(
     try:
         assert workbook.sheetnames == [sheet_name]
         assert workbook[sheet_name]["AK1"].value == HEADER_SALE_PRICE
-        assert workbook[sheet_name]["AK8"].value == "4950000"
+        assert workbook[sheet_name].max_row == 2
+        assert workbook[sheet_name]["D2"].value == BARCODE_CODE
+        assert workbook[sheet_name]["AK2"].value == "4950000"
     finally:
         workbook.close()
 
@@ -203,9 +205,16 @@ def test_single_final_price_update(tmp_path: Path) -> None:
     output = tmp_path / "out.xlsx"
     result = update_final_sale_prices(source, output, [_barcode_update()])
     assert result.updated_count == 1
-    assert _changed_cells(source, output) == {
-        (PRODUCT_SHEET_NAME, "AK8"): ("7500", "4950000"),
-    }
+    assert result.exported_row_count == 1
+    workbook = load_workbook(output)
+    try:
+        sheet = workbook[PRODUCT_SHEET_NAME]
+        assert sheet.max_row == 2
+        assert sheet["D2"].value == BARCODE_CODE
+        assert sheet["E2"].value == BARCODE_NAME
+        assert sheet["AK2"].value == "4950000"
+    finally:
+        workbook.close()
 
 
 def test_multiple_final_price_updates(tmp_path: Path) -> None:
@@ -222,8 +231,11 @@ def test_multiple_final_price_updates(tmp_path: Path) -> None:
     workbook = load_workbook(output)
     try:
         sheet = workbook[PRODUCT_SHEET_NAME]
-        assert sheet["AK3"].value == "920000"
-        assert sheet["AK8"].value == "525000"
+        assert sheet.max_row == 3
+        assert sheet["D2"].value == "001234"
+        assert sheet["AK2"].value == "920000"
+        assert sheet["D3"].value == BARCODE_CODE
+        assert sheet["AK3"].value == "525000"
     finally:
         workbook.close()
 
@@ -255,8 +267,9 @@ def test_repeated_spaces_in_name_still_match(tmp_path: Path) -> None:
     workbook = load_workbook(output)
     try:
         sheet = workbook[PRODUCT_SHEET_NAME]
-        assert sheet["E8"].value == "Test  Barcode   Zero"
-        assert sheet["AK8"].value == "4950000"
+        assert sheet.max_row == 2
+        assert sheet["E2"].value == "Test  Barcode   Zero"
+        assert sheet["AK2"].value == "4950000"
     finally:
         workbook.close()
 
@@ -289,8 +302,9 @@ def test_update_without_product_code(tmp_path: Path) -> None:
     workbook = load_workbook(output)
     try:
         sheet = workbook[PRODUCT_SHEET_NAME]
-        assert sheet["AK8"].value == "4950000"
-        assert sheet["D8"].value == BARCODE_CODE
+        assert sheet.max_row == 2
+        assert sheet["AK2"].value == "4950000"
+        assert sheet["D2"].value == BARCODE_CODE
     finally:
         workbook.close()
 
@@ -317,10 +331,12 @@ def test_row_order_is_taken_from_the_current_workbook(tmp_path: Path) -> None:
     workbook = load_workbook(output)
     try:
         sheet = workbook[PRODUCT_SHEET_NAME]
-        assert sheet["D3"].value == BARCODE_CODE
-        assert sheet["AK3"].value == "4950000"
-        assert sheet["D8"].value == "001234"
-        assert sheet["AK8"].value == "30000"
+        assert sheet.max_row == 2
+        assert sheet["D2"].value == BARCODE_CODE
+        assert sheet["E2"].value == BARCODE_NAME
+        assert sheet["AK2"].value == "4950000"
+        codes = [sheet.cell(row, 4).value for row in range(2, sheet.max_row + 1)]
+        assert "001234" not in codes
     finally:
         workbook.close()
 
@@ -343,8 +359,15 @@ def test_row_far_below_the_sample_fixture_is_updated(tmp_path: Path) -> None:
         output,
         [_price(500, "Far Row Product", Decimal("880000"), "98000")],
     )
-    changes = _changed_cells(source, output)
-    assert changes == {(PRODUCT_SHEET_NAME, "AK500"): ("1000", "880000")}
+    workbook = load_workbook(output)
+    try:
+        sheet = workbook[PRODUCT_SHEET_NAME]
+        assert sheet.max_row == 2
+        assert sheet["D2"].value == "98000"
+        assert sheet["E2"].value == "Far Row Product"
+        assert sheet["AK2"].value == "880000"
+    finally:
+        workbook.close()
 
 
 def test_other_price_columns_unchanged(tmp_path: Path) -> None:
@@ -355,16 +378,19 @@ def test_other_price_columns_unchanged(tmp_path: Path) -> None:
     after = load_workbook(output)
     try:
         headers = _header_map(source)
+        assert after[PRODUCT_SHEET_NAME].max_row == 2
         for header in NEIGHBOR_PRICE_HEADERS:
             letter = headers[header]
-            for row in range(1, 9):
-                assert after[PRODUCT_SHEET_NAME][f"{letter}{row}"].value == (
-                    before[PRODUCT_SHEET_NAME][f"{letter}{row}"].value
-                )
-        assert after[PRODUCT_SHEET_NAME]["AH8"].value == "5000"
-        assert after[PRODUCT_SHEET_NAME]["AI8"].value == "0"
-        assert after[PRODUCT_SHEET_NAME]["AL8"].value == "8000"
-        assert after[PRODUCT_SHEET_NAME]["AM8"].value == "7000"
+            assert after[PRODUCT_SHEET_NAME][f"{letter}1"].value == (
+                before[PRODUCT_SHEET_NAME][f"{letter}1"].value
+            )
+            assert after[PRODUCT_SHEET_NAME][f"{letter}2"].value == (
+                before[PRODUCT_SHEET_NAME][f"{letter}8"].value
+            )
+        assert after[PRODUCT_SHEET_NAME]["AH2"].value == "5000"
+        assert after[PRODUCT_SHEET_NAME]["AI2"].value == "0"
+        assert after[PRODUCT_SHEET_NAME]["AL2"].value == "8000"
+        assert after[PRODUCT_SHEET_NAME]["AM2"].value == "7000"
     finally:
         before.close()
         after.close()
@@ -381,13 +407,14 @@ def test_product_metadata_unchanged(tmp_path: Path) -> None:
     before = load_workbook(source)
     after = load_workbook(output)
     try:
+        assert after[PRODUCT_SHEET_NAME].max_row == 2
         for letter in ("D", "E", "F", "H", "AF", "C"):
-            assert after[PRODUCT_SHEET_NAME][f"{letter}3"].value == (
+            assert after[PRODUCT_SHEET_NAME][f"{letter}2"].value == (
                 before[PRODUCT_SHEET_NAME][f"{letter}3"].value
             )
-        assert after[PRODUCT_SHEET_NAME]["D3"].value == "001234"
-        assert after[PRODUCT_SHEET_NAME]["E3"].value == "Test Fitting Zero"
-        assert after[PRODUCT_SHEET_NAME]["F3"].value == "001122334455"
+        assert after[PRODUCT_SHEET_NAME]["D2"].value == "001234"
+        assert after[PRODUCT_SHEET_NAME]["E2"].value == "Test Fitting Zero"
+        assert after[PRODUCT_SHEET_NAME]["F2"].value == "001122334455"
     finally:
         before.close()
         after.close()
@@ -397,9 +424,16 @@ def test_unrelated_rows_unchanged(tmp_path: Path) -> None:
     source = _copy_fixture(tmp_path)
     output = tmp_path / "out.xlsx"
     update_final_sale_prices(source, output, [_barcode_update()])
-    assert _changed_cells(source, output) == {
-        (PRODUCT_SHEET_NAME, "AK8"): ("7500", "4950000"),
-    }
+    workbook = load_workbook(output)
+    try:
+        sheet = workbook[PRODUCT_SHEET_NAME]
+        assert sheet.max_row == 2
+        assert sheet["D2"].value == BARCODE_CODE
+        assert sheet["AK2"].value == "4950000"
+        codes = [sheet.cell(row, 4).value for row in range(2, sheet.max_row + 1)]
+        assert codes == [BARCODE_CODE]
+    finally:
+        workbook.close()
 
 
 def test_cell_diff_only_requested_sale_prices(tmp_path: Path) -> None:
@@ -413,10 +447,16 @@ def test_cell_diff_only_requested_sale_prices(tmp_path: Path) -> None:
             _price(6, "Test Precision Price", Decimal("990000"), "90003"),
         ],
     )
-    assert _changed_cells(source, output) == {
-        (PRODUCT_SHEET_NAME, "AK3"): ("30000", "920000"),
-        (PRODUCT_SHEET_NAME, "AK6"): ("0.1", "990000"),
-    }
+    workbook = load_workbook(output)
+    try:
+        sheet = workbook[PRODUCT_SHEET_NAME]
+        assert sheet.max_row == 3
+        assert sheet["D2"].value == "001234"
+        assert sheet["AK2"].value == "920000"
+        assert sheet["D3"].value == "90003"
+        assert sheet["AK3"].value == "990000"
+    finally:
+        workbook.close()
 
 
 def test_source_hash_unchanged(tmp_path: Path) -> None:
@@ -457,17 +497,37 @@ def test_existing_output_file_rejected(tmp_path: Path) -> None:
     assert output.read_bytes() == b"already here"
 
 
-def test_duplicate_target_row_fails_even_when_prices_match(tmp_path: Path) -> None:
+def test_duplicate_target_row_with_the_same_price_is_one_row(tmp_path: Path) -> None:
     source = _copy_fixture(tmp_path)
+    output = tmp_path / "out.xlsx"
+    result = update_final_sale_prices(
+        source,
+        output,
+        [_barcode_update(Decimal("4500000")), _barcode_update(Decimal("4500000"))],
+    )
+    assert result.updated_count == 1
+    assert result.exported_row_count == 1
+    workbook = load_workbook(output)
+    try:
+        assert workbook[PRODUCT_SHEET_NAME].max_row == 2
+        assert workbook[PRODUCT_SHEET_NAME]["AK2"].value == "4500000"
+    finally:
+        workbook.close()
+
+
+def test_conflicting_prices_for_one_product_do_not_export(tmp_path: Path) -> None:
+    source = _copy_fixture(tmp_path)
+    before = _sha256(source)
     output = tmp_path / "out.xlsx"
     with pytest.raises(DuplicateUpdateError) as exc_info:
         update_final_sale_prices(
             source,
             output,
-            [_barcode_update(Decimal("4500000")), _barcode_update(Decimal("4500000"))],
+            [_barcode_update(Decimal("4500000")), _barcode_update(Decimal("4600000"))],
         )
-    assert "8" in str(exc_info.value)
+    assert "conflicting final sale prices" in str(exc_info.value)
     assert not output.exists()
+    assert _sha256(source) == before
 
 
 @pytest.mark.parametrize(
@@ -508,7 +568,7 @@ def test_decimal_whole_prices_are_written_as_integer_text(tmp_path: Path) -> Non
     )
     workbook = load_workbook(output)
     try:
-        cell = workbook[PRODUCT_SHEET_NAME]["AK8"]
+        cell = workbook[PRODUCT_SHEET_NAME]["AK2"]
         assert cell.value == "4950000"
         assert isinstance(cell.value, str)
         assert cell.data_type == "s"
@@ -551,15 +611,14 @@ def test_sale_price_header_is_used_when_column_is_not_ak(tmp_path: Path) -> None
 
     output = tmp_path / "out.xlsx"
     update_final_sale_prices(source, output, [_barcode_update()])
-    assert _changed_cells(source, output) == {
-        (PRODUCT_SHEET_NAME, f"{moved}8"): ("7500", "4950000"),
-    }
     workbook = load_workbook(output)
     try:
         sheet = workbook[PRODUCT_SHEET_NAME]
-        assert sheet["AK8"].value == "7500"
+        assert sheet.max_row == 2
+        assert sheet["D2"].value == BARCODE_CODE
+        assert sheet["AK2"].value == "7500"
         assert sheet[f"{moved}1"].value == HEADER_SALE_PRICE
-        assert sheet[f"{moved}8"].value == "4950000"
+        assert sheet[f"{moved}2"].value == "4950000"
     finally:
         workbook.close()
 
@@ -588,7 +647,7 @@ def test_updated_cell_style_is_preserved(tmp_path: Path) -> None:
     update_final_sale_prices(source, output, [_barcode_update()])
     workbook = load_workbook(output)
     try:
-        cell = workbook[PRODUCT_SHEET_NAME]["AK8"]
+        cell = workbook[PRODUCT_SHEET_NAME]["AK2"]
         assert cell.value == "4950000"
         assert cell.font.name == "Carlito"
         assert cell.font.size == 14
@@ -603,11 +662,11 @@ def test_updated_cell_style_is_preserved(tmp_path: Path) -> None:
         workbook.close()
 
 
-def test_unrelated_formulas_and_workbook_structure_preserved(tmp_path: Path) -> None:
+def test_unselected_rows_and_stale_ranges_are_removed(tmp_path: Path) -> None:
     source = _copy_fixture(tmp_path)
     workbook = load_workbook(source)
     sheet = workbook[PRODUCT_SHEET_NAME]
-    sheet["AG2"] = "=AH2"
+    sheet["AG3"] = "=AH3"
     sheet.merge_cells("A2:A3")
     sheet.freeze_panes = "D2"
     sheet.auto_filter.ref = "A1:AN8"
@@ -617,7 +676,7 @@ def test_unrelated_formulas_and_workbook_structure_preserved(tmp_path: Path) -> 
     note.sheet_state = "hidden"
     note["A1"] = "=1+1"
     workbook.defined_names.add(
-        DefinedName(name="SaleAnchor", attr_text="'لیست کالا'!$D$2")
+        DefinedName(name="SaleAnchor", attr_text="'لیست کالا'!$D$2:$AN$8")
     )
     validation = DataValidation(type="list", formula1='"yes,no"', allow_blank=True)
     validation.add("C2:C8")
@@ -626,27 +685,32 @@ def test_unrelated_formulas_and_workbook_structure_preserved(tmp_path: Path) -> 
     workbook.close()
 
     output = tmp_path / "out.xlsx"
-    update_final_sale_prices(
+    result = update_final_sale_prices(
         source,
         output,
         [_price(3, "Test Fitting Zero", Decimal("920000"), "001234")],
     )
+    assert result.exported_row_count == 1
     workbook = load_workbook(output)
     try:
         sheet = workbook[PRODUCT_SHEET_NAME]
-        assert sheet["AG2"].value == "=AH2"
-        assert "A2:A3" in {str(rng) for rng in sheet.merged_cells.ranges}
+        assert sheet.max_row == 2
+        assert sheet["D2"].value == "001234"
+        assert sheet["AG2"].value == "=AH3"
+        assert sheet["AK2"].value == "920000"
+        assert "A2:A3" not in {str(rng) for rng in sheet.merged_cells.ranges}
         assert sheet.freeze_panes == "D2"
-        assert sheet.auto_filter.ref == "A1:AN8"
-        assert sheet.row_dimensions[8].hidden is True
+        assert sheet.auto_filter.ref is None
+        assert sheet.row_dimensions[2].hidden is not True
         assert sheet.column_dimensions["B"].hidden is True
         assert workbook.sheetnames == [PRODUCT_SHEET_NAME, "یادداشت"]
         assert workbook["یادداشت"].sheet_state == "hidden"
         assert workbook["یادداشت"]["A1"].value == "=1+1"
-        assert "SaleAnchor" in workbook.defined_names
-        assert len(sheet.data_validations.dataValidation) == 1
-        assert sheet["AK3"].value == "920000"
-        assert sheet["AK8"].value == "7500"
+        assert "SaleAnchor" not in workbook.defined_names
+        assert list(sheet.tables) == []
+        assert len(sheet.data_validations.dataValidation) == 0
+        codes = [sheet.cell(row, 4).value for row in range(2, (sheet.max_row or 1) + 1)]
+        assert BARCODE_CODE not in codes
     finally:
         workbook.close()
 

@@ -199,7 +199,6 @@ def test_price_warning_blocks_export_until_approved() -> None:
         items,
         products,
         processor=AzinPipeProcessor(),
-        confirmed_sale_currency="rial",
     )
     enriched = apply_price_warnings(result.candidates)
     assert enriched[0].warnings

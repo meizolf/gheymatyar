@@ -33,25 +33,15 @@ def test_excluded_row_not_updated_in_download(
     ws = wb.active
     headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
     sale_idx = headers.index("نرخ فروش اصلی")
-
-    keep_row = [
-        c.value
-        for c in next(ws.iter_rows(min_row=keep["row_number"], max_row=keep["row_number"]))
-    ]
-    assert str(keep_row[sale_idx]).replace(",", "") == str(keep["new_price"]).replace(
-        ",", ""
-    )
-
-    # Excluded row must keep the old price from the original workbook semantics:
-    # writer only patches exportable rows, so old_price remains.
-    drop_row = [
-        c.value
-        for c in next(ws.iter_rows(min_row=drop["row_number"], max_row=drop["row_number"]))
-    ]
-    assert str(drop_row[sale_idx]).replace(",", "") == str(drop["old_price"]).replace(
-        ",", ""
-    )
+    code_idx = headers.index("کد کالا")
+    rows = list(ws.iter_rows(min_row=2, values_only=True))
     wb.close()
+    assert len(rows) == 1
+    assert str(rows[0][sale_idx]).replace(",", "") == str(keep["new_price"]).replace(
+        ",", ""
+    )
+    assert str(rows[0][code_idx]) == str(keep["pioneers_code"])
+    assert str(drop["pioneers_code"]) != str(rows[0][code_idx])
 
     # Original fixture untouched
     assert pioneers_azin_excel.stat().st_size > 0

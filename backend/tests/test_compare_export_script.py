@@ -49,6 +49,35 @@ def test_compare_export_accepts_sale_only_change(tmp_path: Path, compare_mod) ->
     compare_mod.compare(source, exported, _sha(source))
 
 
+def test_compare_export_accepts_filtered_product_rows(
+    tmp_path: Path, compare_mod
+) -> None:
+    source = tmp_path / "src.xlsx"
+    exported = tmp_path / "out.xlsx"
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Products"
+    ws.append(["کد", "نرخ فروش اصلی", "نام"])
+    ws.append(["1", "100", "الف"])
+    ws.append(["2", "200", "ب"])
+    ws.append(["3", "300", "پ"])
+    wb.create_sheet("Meta").append(["note", "unchanged"])
+    wb.save(source)
+    wb.close()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Products"
+    ws.append(["کد", "نرخ فروش اصلی", "نام"])
+    ws.append(["2", "250", "ب"])
+    wb.create_sheet("Meta").append(["note", "unchanged"])
+    wb.save(exported)
+    wb.close()
+    compare_mod.compare(source, exported, _sha(source))
+
+
 def test_compare_export_rejects_other_column_change(
     tmp_path: Path, compare_mod
 ) -> None:

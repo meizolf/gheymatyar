@@ -7,11 +7,7 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-from tests.confirmed_metre import (
-    enable_rial_per_metre,
-    metre_items,
-    workbook_with_supplier_names,
-)
+from tests.confirmed_metre import metre_items, workbook_with_supplier_names
 
 from gheymatyar.parsers.pioneers_excel_parser import HEADER_NAME, HEADER_SALE_PRICE
 from gheymatyar.suppliers.abrahan_pipe import AbrahanPipeProcessor
@@ -105,9 +101,15 @@ def test_abrahan_export_changes_only_final_sale_price(
     output = tmp_path / "out.xlsx"
     output.write_bytes(download.content)
     after = _snapshot(output)
-    changed = [key for key in before if before[key] != after[key]]
-    assert changed == [(2, sale_col)]
-    assert str(after[(2, sale_col)]).replace(",", "") == str(item.price)
+    assert max(row for row, _column in before) > 2
+    assert {row for row, _column in after} == {1, 2}
+    for key, value in before.items():
+        if key[0] > 2:
+            continue
+        if key == (2, sale_col):
+            assert str(after[key]).replace(",", "") == str(item.price)
+        else:
+            assert after[key] == value
     assert pioneers_azin_excel.read_bytes() == source_hash
 
 
@@ -116,7 +118,6 @@ def test_confirmed_metre_export_changes_only_final_sale_price(
 ) -> None:
     item = metre_items(dina_pdf)[0]
     assert item.unit == "متر"
-    enable_rial_per_metre(client)
     edited = tmp_path / "pioneers.xlsx"
     workbook_with_supplier_names(pioneers_azin_excel, edited, [item.supplier_name])
     workbook = load_workbook(edited)
@@ -178,7 +179,13 @@ def test_confirmed_metre_export_changes_only_final_sale_price(
     output = tmp_path / "out.xlsx"
     output.write_bytes(download.content)
     after = _snapshot(output)
-    changed = [key for key in before if before[key] != after[key]]
-    assert changed == [(2, sale_col)]
-    assert str(after[(2, sale_col)]).replace(",", "") == str(item.price)
+    assert max(row for row, _column in before) > 2
+    assert {row for row, _column in after} == {1, 2}
+    for key, value in before.items():
+        if key[0] > 2:
+            continue
+        if key == (2, sale_col):
+            assert str(after[key]).replace(",", "") == str(item.price)
+        else:
+            assert after[key] == value
     assert pioneers_azin_excel.read_bytes() == source_hash

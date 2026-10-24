@@ -7,14 +7,10 @@ import { Button } from '../components/ui/Button'
 import { Spinner } from '../components/ui/Spinner'
 
 const THRESHOLD_KEY = 'suspicious_percent_threshold'
-const CURRENCY_KEY = 'pioneers_sale_currency'
-const BASIS_KEY = 'pioneers_sale_basis'
 
 export function SettingsPage() {
   const queryClient = useQueryClient()
   const [threshold, setThreshold] = useState('30')
-  const [saleCurrency, setSaleCurrency] = useState('')
-  const [saleBasis, setSaleBasis] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -27,16 +23,12 @@ export function SettingsPage() {
     const stored = settingsQuery.data?.settings
     if (!stored) return
     if (stored[THRESHOLD_KEY]) setThreshold(stored[THRESHOLD_KEY])
-    setSaleCurrency(stored[CURRENCY_KEY] ?? '')
-    setSaleBasis(stored[BASIS_KEY] ?? '')
   }, [settingsQuery.data])
 
   const saveMutation = useMutation({
     mutationFn: () =>
       api.updateSettings({
         [THRESHOLD_KEY]: threshold.trim(),
-        [CURRENCY_KEY]: saleCurrency,
-        [BASIS_KEY]: saleBasis,
       }),
     onSuccess: async () => {
       setMessage('تنظیمات ذخیره شد.')
@@ -93,42 +85,8 @@ export function SettingsPage() {
             />
             <p className="field-hint">
               تغییرات مطلق بیش از این درصد نیاز به تأیید صریح دارند. مقدار پیش‌فرض
-              سرور: ۳۰
-            </p>
-          </div>
-          <div className="field" style={{ maxWidth: 420 }}>
-            <label htmlFor="sale-currency">ارز نرخ فروش اصلی</label>
-            <select
-              id="sale-currency"
-              value={saleCurrency}
-              onChange={(e) => setSaleCurrency(e.target.value)}
-            >
-              <option value="">تأیید نشده</option>
-              <option value="rial">ریال</option>
-            </select>
-            <p className="field-hint">
-              نرخ فروش اصلی پایونیرز به‌صورت تأییدشده ریالی است (پیش‌فرض). انتخاب
-              «تأیید نشده» خروجی را مسدود می‌کند. تبدیل تومان→ریال فقط در
-              پردازنده تأمین‌کننده‌ای مثل تاپ (×۱۰) انجام می‌شود.
-            </p>
-          </div>
-          <div className="field" style={{ maxWidth: 420 }}>
-            <label htmlFor="sale-basis">مبنای نرخ فروش وقتی واحد در اکسل نیست</label>
-            <select
-              id="sale-basis"
-              value={saleBasis}
-              onChange={(e) => setSaleBasis(e.target.value)}
-            >
-              <option value="">تأیید نشده</option>
-              <option value="meter">هر متر</option>
-              <option value="piece">هر عدد</option>
-            </select>
-            <p className="field-hint">
-              اگر خود ردیف واحد داشته باشد، همان واحد ملاک است. قیمت هر متر روی
-              شاخه نوشته نمی‌شود و متراژ/کارتن در قیمت ضرب نمی‌شود. مبالغ چاپی
-              تأییدشدهٔ آذین، نیوپایپ و آبراهان بدون نیاز به این مبنا خروجی
-              می‌شوند. تغییر یا پاک کردن ارز یا مبنا، نشست‌های باز را دوباره
-              بررسی می‌کند و فایل اکسل ساخته‌شده را باطل می‌کند.
+              سرور: ۳۰. نرخ فروش اصلی پایونیرز همیشه ریال است و قیمت در متراژ یا
+              تعداد بسته ضرب نمی‌شود.
             </p>
           </div>
 

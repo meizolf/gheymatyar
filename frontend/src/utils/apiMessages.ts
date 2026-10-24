@@ -50,6 +50,18 @@ const PATTERNS: Array<{ re: RegExp; fa: string | ((m: RegExpMatchArray) => strin
     fa: 'هیچ به‌روزرسانی تأییدشده‌ای برای خروجی وجود ندارد. ابتدا موارد را تأیید یا شامل کنید.',
   },
   {
+    re: /conflicting final sale prices for the same Pioneers product/i,
+    fa: 'چند قیمت متفاوت برای یک کالای پایونیرز تأیید شده است. تا رفع تعارض، خروجی ساخته نمی‌شود.',
+  },
+  {
+    re: /selected Pioneers product cannot be identified uniquely/i,
+    fa: 'کالای انتخاب‌شده در فایل پایونیرز یکتا نیست. خروجی ساخته نمی‌شود.',
+  },
+  {
+    re: /exported product row count does not match/i,
+    fa: 'تعداد ردیف‌های فایل خروجی با انتخاب تأییدشده یکی نیست.',
+  },
+  {
     re: /no exportable candidates|nothing to export/i,
     fa: 'هیچ ردیف قابل خروجی وجود ندارد. ابتدا موارد را تأیید یا شامل کنید.',
   },
@@ -84,16 +96,12 @@ const PATTERNS: Array<{ re: RegExp; fa: string | ((m: RegExpMatchArray) => strin
       `قیمت تأمین‌کننده برای هر عدد است و واحد پایونیرز ${m[1]} است. تبدیلی انجام نشده و خروجی مسدود است.`,
   },
   {
-    re: /price basis: Pioneers price basis is not on the workbook and was not confirmed/i,
-    fa: 'مبنای قیمت در فایل پایونیرز نیست و تأیید نشده است. خروجی مسدود است.',
+    re: /price basis: Pioneers unit is not a recognised metre, piece, or branch/i,
+    fa: 'واحد پایونیرز متر، عدد یا شاخه نیست. تبدیلی انجام نشده و خروجی مسدود است.',
   },
   {
     re: /price basis: supplier price basis is not an explicit per-metre or per-piece price/i,
     fa: 'مبنای قیمت تأمین‌کننده به‌صورت هر متر یا هر عدد مشخص نیست. خروجی تا تأیید واحد مسدود است.',
-  },
-  {
-    re: /sale currency: Pioneers sale currency is not confirmed/i,
-    fa: 'ارز نرخ فروش پایونیرز تأیید نشده است. هیچ تبدیلی انجام نمی‌شود و خروجی مسدود است.',
   },
   {
     re: /sale currency: supplier currency was not stated/i,

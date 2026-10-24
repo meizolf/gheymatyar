@@ -30,6 +30,7 @@ ABRAHAN_PDF = FIXTURES / "suppliers" / "abrahan_pipe_1405_07_15.pdf"
 PARS_PLAST_PDF = FIXTURES / "suppliers" / "pars_plast_1405_07_11.pdf"
 KAVEH_PDF = FIXTURES / "suppliers" / "kaveh_gostar_1405_06.pdf"
 PG234_PDF = FIXTURES / "suppliers" / "pg234_1405_07_22.pdf"
+KIAN_PDF = FIXTURES / "suppliers" / "kian_hose_mehr_1405.pdf"
 
 
 @pytest.fixture
@@ -124,6 +125,11 @@ def kaveh_pdf() -> Path:
 @pytest.fixture(scope="module")
 def pg234_pdf() -> Path:
     return _require_pdf(PG234_PDF)
+
+
+@pytest.fixture(scope="module")
+def kian_pdf() -> Path:
+    return _require_pdf(KIAN_PDF)
 
 
 @pytest.fixture

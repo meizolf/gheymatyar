@@ -3,9 +3,9 @@
 
 Asserts:
   * source SHA-256 matches the caller-supplied pre-export hash (immutability)
-  * every worksheet is compared (not only the active sheet)
-  * cell *formulas* and cached values are compared (``data_only=False``)
-  * only ``نرخ فروش اصلی`` cells on the product sheet may differ
+  * non-product worksheets are unchanged
+  * the product sheet keeps its headers and contains only approved product rows
+  * within those rows, only ``نرخ فروش اصلی`` may differ
   * at least one sale-price cell changed
 
 For HTML-based ``.xls`` sources, pass ``--html-xls`` to convert with the same
@@ -58,6 +58,156 @@ def _product_sheet_name(wb) -> str:
     return matches[0]
 
 
+_CODE_HEADERS = {"کد کالا", "کد"}
+
+
+def _blank(value: object) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _compare_exact_sheet(src_ws: Worksheet, out_ws: Worksheet) -> None:
+    src_dims = (src_ws.max_row or 0, src_ws.max_column or 0)
+    out_dims = (out_ws.max_row or 0, out_ws.max_column or 0)
+    if src_dims != out_dims:
+        raise SystemExit(
+            f"sheet {src_ws.title!r} dimensions changed: {src_dims} -> {out_dims}"
+        )
+    max_row, max_col = src_dims
+    for row in range(1, max_row + 1):
+        for col in range(1, max_col + 1):
+            src_cell = src_ws.cell(row=row, column=col)
+            out_cell = out_ws.cell(row=row, column=col)
+            if _cell_key(src_cell) != _cell_key(out_cell):
+                raise SystemExit(
+                    f"cell changed at {src_ws.title}!R{row}C{col}: "
+                    f"{_cell_key(src_cell)!r} -> {_cell_key(out_cell)!r}"
+                )
+
+
+def _compare_product_sheet(src_ws: Worksheet, out_ws: Worksheet) -> int:
+    """Export rows are the approved subset. Only the sale column may differ."""
+    src_headers = _header_row(src_ws)
+    out_headers = _header_row(out_ws)
+    if src_headers != out_headers:
+        raise SystemExit(
+            f"cell changed at {src_ws.title}!R1: headers "
+            f"{src_headers!r} -> {out_headers!r}"
+        )
+    src_cols = src_ws.max_column or 0
+    out_cols = out_ws.max_column or 0
+    if src_cols != out_cols:
+        raise SystemExit(
+            f"sheet {src_ws.title!r} dimensions changed: "
+            f"columns {src_cols} -> {out_cols}"
+        )
+    sale_col = src_headers.index(SALE_HEADER) + 1
+    code_col = next(
+        (index + 1 for index, header in enumerate(src_headers) if header in _CODE_HEADERS),
+        None,
+    )
+    out_max = out_ws.max_row or 1
+    src_max = src_ws.max_row or 1
+    if out_max > src_max:
+        raise SystemExit(
+            f"sheet {src_ws.title!r} dimensions changed: "
+            f"rows {src_max} -> {out_max}"
+        )
+
+    by_code: dict[str, list[int]] = {}
+    for row in range(2, src_max + 1):
+        if code_col is None:
+            break
+        value = src_ws.cell(row, code_col).value
+        if _blank(value):
+            continue
+        by_code.setdefault(str(value).strip(), []).append(row)
+
+    used: set[int] = set()
+    changed = 0
+    for row in range(2, out_max + 1):
+        if row in out_ws.row_dimensions and out_ws.row_dimensions[row].hidden:
+            raise SystemExit(f"hidden product row {out_ws.title}!R{row}")
+        values = [out_ws.cell(row, col).value for col in range(1, out_cols + 1)]
+        if all(_blank(value) for value in values):
+            raise SystemExit(f"blank product row {out_ws.title}!R{row}")
+        source_row = _match_source_row(
+            src_ws,
+            out_ws,
+            row,
+            sale_col=sale_col,
+            code_col=code_col,
+            by_code=by_code,
+            used=used,
+            max_col=out_cols,
+        )
+        used.add(source_row)
+        for col in range(1, out_cols + 1):
+            src_cell = src_ws.cell(source_row, col)
+            out_cell = out_ws.cell(row, col)
+            if col == sale_col:
+                if out_cell.data_type == "f" and src_cell.data_type != "f":
+                    raise SystemExit(
+                        f"sale cell became a formula at "
+                        f"{out_ws.title}!R{row}C{col}: {out_cell.value!r}"
+                    )
+                if _cell_key(src_cell) != _cell_key(out_cell):
+                    changed += 1
+                continue
+            if _cell_key(src_cell) != _cell_key(out_cell):
+                raise SystemExit(
+                    f"cell changed at {out_ws.title}!R{row}C{col}: "
+                    f"{_cell_key(src_cell)!r} -> {_cell_key(out_cell)!r}"
+                )
+    return changed
+
+
+def _match_source_row(
+    src_ws: Worksheet,
+    out_ws: Worksheet,
+    row: int,
+    *,
+    sale_col: int,
+    code_col: int | None,
+    by_code: dict[str, list[int]],
+    used: set[int],
+    max_col: int,
+) -> int:
+    if code_col is not None:
+        code = out_ws.cell(row, code_col).value
+        if not _blank(code):
+            matches = [
+                source_row
+                for source_row in by_code.get(str(code).strip(), [])
+                if source_row not in used
+            ]
+            if len(matches) == 1:
+                return matches[0]
+            raise SystemExit(
+                "selected Pioneers product cannot be identified uniquely: "
+                f"{code!r} at {out_ws.title}!R{row}"
+            )
+    signature = tuple(
+        out_ws.cell(row, col).value for col in range(1, max_col + 1) if col != sale_col
+    )
+    matches = []
+    for source_row in range(2, (src_ws.max_row or 1) + 1):
+        if source_row in used:
+            continue
+        source_signature = tuple(
+            src_ws.cell(source_row, col).value
+            for col in range(1, max_col + 1)
+            if col != sale_col
+        )
+        if source_signature == signature:
+            matches.append(source_row)
+    if len(matches) != 1:
+        raise SystemExit(
+            f"cell changed at {out_ws.title}!R{row}: "
+            "export row does not match one source product"
+        )
+    return matches[0]
+
+
 def _compare_workbooks(source: Path, exported: Path) -> int:
     src_wb = load_workbook(source, data_only=False)
     out_wb = load_workbook(exported, data_only=False)
@@ -70,42 +220,12 @@ def _compare_workbooks(source: Path, exported: Path) -> int:
             )
 
         product_sheet = _product_sheet_name(src_wb)
-        sale_idx = _header_row(src_wb[product_sheet]).index(SALE_HEADER)
         changed = 0
-
         for sheet_name in src_wb.sheetnames:
-            src_ws = src_wb[sheet_name]
-            out_ws = out_wb[sheet_name]
-            src_dims = (src_ws.max_row or 0, src_ws.max_column or 0)
-            out_dims = (out_ws.max_row or 0, out_ws.max_column or 0)
-            if src_dims != out_dims:
-                raise SystemExit(
-                    f"sheet {sheet_name!r} dimensions changed: "
-                    f"{src_dims} -> {out_dims}"
-                )
-
-            max_row, max_col = src_dims
-            allow_sale = sheet_name == product_sheet
-            for row in range(1, max_row + 1):
-                for col in range(1, max_col + 1):
-                    src_cell = src_ws.cell(row=row, column=col)
-                    out_cell = out_ws.cell(row=row, column=col)
-                    if allow_sale and col == sale_idx + 1 and row > 1:
-                        if _cell_key(src_cell) != _cell_key(out_cell):
-                            # Sale column may change value, but must not become a formula
-                            # unless the source was already a formula of the same shape.
-                            if out_cell.data_type == "f" and src_cell.data_type != "f":
-                                raise SystemExit(
-                                    f"sale cell became a formula at "
-                                    f"{sheet_name}!R{row}C{col}: {out_cell.value!r}"
-                                )
-                            changed += 1
-                        continue
-                    if _cell_key(src_cell) != _cell_key(out_cell):
-                        raise SystemExit(
-                            f"cell changed at {sheet_name}!R{row}C{col}: "
-                            f"{_cell_key(src_cell)!r} -> {_cell_key(out_cell)!r}"
-                        )
+            if sheet_name == product_sheet:
+                changed += _compare_product_sheet(src_wb[sheet_name], out_wb[sheet_name])
+            else:
+                _compare_exact_sheet(src_wb[sheet_name], out_wb[sheet_name])
         return changed
     finally:
         src_wb.close()

@@ -80,6 +80,19 @@ def _cell(value: object) -> str:
     return str(value).replace(",", "").strip()
 
 
+def _sale_for_code(sheet, code: str | None):
+    """Sale cell of one product in a filtered workbook, or None if it is absent."""
+    if not code:
+        return None
+    headers = {cell.value: cell.column for cell in sheet[1]}
+    wanted = str(code)
+    for row in range(2, (sheet.max_row or 1) + 1):
+        value = sheet.cell(row, headers[HEADER_CODE]).value
+        if value is not None and str(value) == wanted:
+            return sheet.cell(row, headers["نرخ فروش اصلی"]).value
+    return None
+
+
 def _db_path(client) -> str:
     return client.app.state.database.engine.url.database
 
@@ -106,11 +119,19 @@ def test_stale_download_does_not_return_deleted_price(client, tmp_path: Path) ->
     assert download.status_code == 200, download.text
     workbook = load_workbook(BytesIO(download.content))
     sheet = workbook.active
-    column = next(cell.column for cell in sheet[1] if cell.value == "نرخ فروش اصلی")
-    leaked = _cell(sheet.cell(drop["row_number"], column).value)
+    assert sheet.max_row == 2
+    headers = {cell.value: cell.column for cell in sheet[1]}
+    kept_price = _cell(sheet.cell(2, headers["نرخ فروش اصلی"]).value)
+    kept_code = sheet.cell(2, headers["کد کالا"]).value
+    codes = {
+        sheet.cell(row, headers["کد کالا"]).value
+        for row in range(2, sheet.max_row + 1)
+    }
     workbook.close()
-    assert leaked == _cell(drop["old_price"])
-    assert leaked != _cell(drop["new_price"])
+    assert drop["pioneers_code"] not in codes
+    assert kept_code == _keep["pioneers_code"]
+    assert kept_price == _cell(_keep["new_price"])
+    assert kept_price != _cell(drop["new_price"])
     exported = client.post(f"/api/sessions/{sid}/export")
     assert exported.status_code == 200, exported.text
     assert exported.json()["updated_count"] == 1
@@ -276,18 +297,21 @@ def test_export_only_sale_cells_change(client, tmp_path: Path) -> None:
     assert response.status_code == 200, response.text
     old = load_workbook(source, data_only=False)
     new = load_workbook(BytesIO(response.content), data_only=False)
-    changed: list[str] = []
     assert old.sheetnames == new.sheetnames
-    for left, right in zip(old.worksheets, new.worksheets):
-        assert (left.max_row, left.max_column) == (right.max_row, right.max_column)
-        sale = next(cell.column for cell in left[1] if cell.value == "نرخ فروش اصلی")
-        for row in left.iter_rows():
-            for cell in row:
-                updated = right[cell.coordinate]
-                if cell.value != updated.value:
-                    changed.append(cell.coordinate)
-                    assert cell.column == sale
-                assert cell._style == updated._style
+    left, right = old.active, new.active
+    assert left.max_row > 3
+    assert right.max_row == 3
+    assert left.max_column == right.max_column
+    sale = next(cell.column for cell in left[1] if cell.value == "نرخ فروش اصلی")
+    changed: list[str] = []
+    for row_idx in range(1, 4):
+        for column in range(1, left.max_column + 1):
+            source_cell = left.cell(row_idx, column)
+            updated = right.cell(row_idx, column)
+            if source_cell.value != updated.value:
+                changed.append(updated.coordinate)
+                assert column == sale
+            assert source_cell._style == updated._style
     assert len(changed) == 2, changed
     assert hashlib.sha256(source.read_bytes()).hexdigest() == before_hash
     old.close()
@@ -523,15 +547,12 @@ def test_direct_export_uses_corrected_mapping(client, tmp_path: Path) -> None:
     old = load_workbook(tmp_path / "named.xlsx")
     new = load_workbook(BytesIO(downloaded.content))
     column = next(cell.column for cell in old.active[1] if cell.value == "نرخ فروش اصلی")
-    changed = [
-        row
-        for row in range(2, old.active.max_row + 1)
-        if old.active.cell(row, column).value != new.active.cell(row, column).value
-    ]
+    exported_sale = _sale_for_code(new.active, target.code)
+    assert exported_sale is not None
+    assert exported_sale != old.active.cell(target.row_number, column).value
+    assert _sale_for_code(new.active, keep["pioneers_code"]) is None
     old.close()
     new.close()
-    assert keep["row_number"] not in changed
-    assert target.row_number in changed
 
 
 def test_legacy_mapping_does_not_leak_between_single_variant_uploads(
@@ -627,9 +648,10 @@ def test_restore_preserves_unrelated_exclusion(client, tmp_path: Path) -> None:
     column = next(
         cell.column for cell in source.active[1] if cell.value == "نرخ فروش اصلی"
     )
-    assert source.active.cell(keep["row_number"], column).value == output.active.cell(
-        keep["row_number"], column
-    ).value
+    assert _sale_for_code(output.active, keep["pioneers_code"]) is None
+    restored_sale = _sale_for_code(output.active, drop["pioneers_code"])
+    assert restored_sale is not None
+    assert restored_sale != source.active.cell(drop["row_number"], column).value
     source.close()
     output.close()
 
@@ -671,12 +693,10 @@ def test_session_only_manual_mapping_survives_export(client, tmp_path: Path) -> 
     column = next(
         cell.column for cell in source.active[1] if cell.value == "نرخ فروش اصلی"
     )
-    assert source.active.cell(keep["row_number"], column).value == output.active.cell(
-        keep["row_number"], column
-    ).value
-    assert source.active.cell(drop["row_number"], column).value != output.active.cell(
-        drop["row_number"], column
-    ).value
+    assert _sale_for_code(output.active, keep["pioneers_code"]) is None
+    mapped_sale = _sale_for_code(output.active, drop["pioneers_code"])
+    assert mapped_sale is not None
+    assert mapped_sale != source.active.cell(drop["row_number"], column).value
     source.close()
     output.close()
     second = exported_target()
@@ -732,16 +752,12 @@ def test_unrelated_ignore_does_not_hide_external_correction(
     column = next(
         cell.column for cell in before.active[1] if cell.value == "نرخ فروش اصلی"
     )
-    changed = [
-        row_number
-        for row_number in range(2, before.active.max_row + 1)
-        if before.active.cell(row_number, column).value
-        != after.active.cell(row_number, column).value
-    ]
+    corrected_sale = _sale_for_code(after.active, target.code)
+    assert corrected_sale is not None
+    assert corrected_sale != before.active.cell(target.row_number, column).value
+    assert _sale_for_code(after.active, keep["pioneers_code"]) is None
     before.close()
     after.close()
-    assert keep["row_number"] not in changed
-    assert target.row_number in changed
     if not save:
         with sqlite3.connect(_db_path(client)) as db:
             codes = [
@@ -794,12 +810,10 @@ def test_unrelated_ignore_keeps_unchanged_session_override(
     column = next(
         cell.column for cell in source.active[1] if cell.value == "نرخ فروش اصلی"
     )
-    assert source.active.cell(keep["row_number"], column).value == output.active.cell(
-        keep["row_number"], column
-    ).value
-    assert source.active.cell(drop["row_number"], column).value != output.active.cell(
-        drop["row_number"], column
-    ).value
+    assert _sale_for_code(output.active, keep["pioneers_code"]) is None
+    mapped_sale = _sale_for_code(output.active, drop["pioneers_code"])
+    assert mapped_sale is not None
+    assert mapped_sale != source.active.cell(drop["row_number"], column).value
     source.close()
     output.close()
     with sqlite3.connect(_db_path(client)) as db:

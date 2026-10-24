@@ -130,51 +130,14 @@ def test_confirm_mapping_keeps_dina_drip_name_collision_block(
     )
 
 
-def _revoke_sale_policy(client: TestClient) -> None:
-    cleared = client.put(
-        "/api/settings",
-        json={
-            "settings": {
-                "pioneers_sale_currency": "",
-                "pioneers_sale_basis": "piece",
-            }
-        },
-    )
-    assert cleared.status_code == 200, cleared.text
+def test_obsolete_sale_policy_keys_are_rejected(client: TestClient) -> None:
+    for key in ("pioneers_sale_currency", "pioneers_sale_basis"):
+        rejected = client.put("/api/settings", json={"settings": {key: "rial"}})
+        assert rejected.status_code == 400, rejected.text
+        assert "unknown setting key" in rejected.json()["detail"]
 
 
-def test_clearing_sale_policy_blocks_first_export(
-    client: TestClient,
-    pioneers_azin_excel: Path,
-    dina_pdf: Path,
-    tmp_path: Path,
-) -> None:
-    session_id, keep, drop = prepare_two_exportable_metre_rows(
-        client, pioneers_azin_excel, dina_pdf, tmp_path
-    )
-    assert client.get(f"/api/sessions/{session_id}/download").status_code == 404
-
-    _revoke_sale_policy(client)
-    preview = client.get(f"/api/sessions/{session_id}/preview").json()["candidates"]
-    for code in (keep["supplier_code"], drop["supplier_code"]):
-        row = next(item for item in preview if item["supplier_code"] == code)
-        assert row["exportable"] is False
-        assert row["new_price"] == (
-            keep["new_price"] if code == keep["supplier_code"] else drop["new_price"]
-        )
-        assert row["pricing_blockers"]
-        approved = client.post(
-            f"/api/sessions/{session_id}/candidates/{row['candidate_id']}/review",
-            json={"decision": "APPROVE"},
-        )
-        assert approved.status_code == 400
-
-    exported = client.post(f"/api/sessions/{session_id}/export")
-    assert exported.status_code == 400
-    assert client.get(f"/api/sessions/{session_id}/download").status_code == 404
-
-
-def test_revoking_sale_policy_drops_existing_workbook(
+def test_threshold_save_does_not_drop_an_approved_export(
     client: TestClient,
     pioneers_azin_excel: Path,
     dina_pdf: Path,
@@ -185,21 +148,25 @@ def test_revoking_sale_policy_drops_existing_workbook(
     )
     exported = client.post(f"/api/sessions/{session_id}/export")
     assert exported.status_code == 200, exported.text
-    first = client.get(f"/api/sessions/{session_id}/download")
-    assert first.status_code == 200
-    assert len(first.content) > 1000
+    assert exported.json()["exported_row_count"] == 2
 
-    _revoke_sale_policy(client)
-    assert client.get(f"/api/sessions/{session_id}/download").status_code == 404
-    again = client.post(f"/api/sessions/{session_id}/export")
-    assert again.status_code == 400
-    assert client.get(f"/api/sessions/{session_id}/download").status_code == 404
+    saved = client.put(
+        "/api/settings",
+        json={"settings": {"suspicious_percent_threshold": "40"}},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["settings"] == {"suspicious_percent_threshold": "40"}
+    assert "pioneers_sale_currency" not in saved.json()["settings"]
+    assert "pioneers_sale_basis" not in saved.json()["settings"]
+
+    download = client.get(f"/api/sessions/{session_id}/download")
+    assert download.status_code == 200
     preview = client.get(f"/api/sessions/{session_id}/preview").json()["candidates"]
     row = next(item for item in preview if item["supplier_code"] == keep["supplier_code"])
-    assert row["exportable"] is False
+    assert row["exportable"] is True
     assert row["new_price"] == keep["new_price"]
 
 
-def test_default_settings_confirm_pioneers_sale_currency_is_rial(client: TestClient) -> None:
+def test_default_settings_are_only_the_warning_threshold(client: TestClient) -> None:
     body = client.get("/api/settings").json()["settings"]
-    assert body["pioneers_sale_currency"] == "rial"
+    assert body == {"suspicious_percent_threshold": "30"}

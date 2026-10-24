@@ -395,18 +395,20 @@ def test_full_grid_only_selected_sale_prices_change(tmp_path: Path) -> None:
     assert _sha256(source) == before_hash
 
     after = _sheet_matrix(output)
-    assert len(after) == len(before)
+    assert len(before) > 3
+    assert len(after) == 3
     sale_col = 36  # 0-based AK
-    changed_rows = {1, 2}  # 0-based data rows 2 and 3
-    for r_index, (brow, arow) in enumerate(zip(before, after, strict=True)):
+    assert after[0] == before[0]
+    for out_index, src_index in ((1, 1), (2, 2)):
+        brow, arow = before[src_index], after[out_index]
         assert len(arow) == len(brow)
         for c_index, (bval, aval) in enumerate(zip(brow, arow, strict=True)):
-            if r_index in changed_rows and c_index == sale_col:
+            if c_index == sale_col:
                 assert aval != bval
                 continue
             assert aval == bval, (
                 f"unexpected change at "
-                f"{get_column_letter(c_index + 1)}{r_index + 1}: "
+                f"{get_column_letter(c_index + 1)} source-row {src_index + 1}: "
                 f"{bval!r} -> {aval!r}"
             )
     assert after[1][sale_col] == "9999999"
@@ -463,6 +465,12 @@ def test_html_azin_xls_plus_pdf_export_workflow(client, tmp_path: Path) -> None:
     export = client.post(f"/api/sessions/{sid}/export")
     assert export.status_code == 200, export.text
     assert export.json()["updated_count"] == 1
+    assert export.json()["exported_row_count"] == 1
+    download = client.get(f"/api/sessions/{sid}/download")
+    assert download.status_code == 200
+    exported_path = tmp_path / "azin_out.xlsx"
+    exported_path.write_bytes(download.content)
+    assert len(_sheet_matrix(exported_path)) == 2
     assert _sha256(HTML_AZIN) == before
     assert source_matrix
     assert html_rows[0][36].strip() == HEADER_SALE_PRICE

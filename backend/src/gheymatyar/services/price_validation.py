@@ -7,6 +7,7 @@ from typing import AbstractSet, Sequence
 
 from gheymatyar.domain.enums import MatchStatus, ReviewDecision
 from gheymatyar.domain.final_sale_price import FinalSalePriceUpdate
+from gheymatyar.domain.sale_policy import PIONEERS_SALE_CURRENCY
 from gheymatyar.domain.update_candidate import UpdateCandidate
 
 DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD = Decimal("30")
@@ -118,21 +119,23 @@ def apply_price_warnings(
 _BASIS_PREFIX = "price basis:"
 _CURRENCY_PREFIX = "sale currency:"
 
-TARGET_BASIS_UNRESOLVED = (
-    "price basis: Pioneers price basis is not on the workbook and was not confirmed; "
-    "automatic export is blocked"
-)
 SOURCE_BASIS_UNRESOLVED = (
     "price basis: supplier price basis is not an explicit per-metre or per-piece price; "
     "automatic export is blocked until the unit is confirmed"
 )
-CURRENCY_UNRESOLVED = (
-    "sale currency: Pioneers sale currency is not confirmed; "
+TARGET_UNIT_UNRECOGNISED = (
+    "price basis: Pioneers unit is not a recognised metre, piece, or branch; "
     "no conversion was applied and automatic export is blocked"
 )
 SUPPLIER_CURRENCY_MISSING = (
     "sale currency: supplier currency was not stated; "
     "automatic export is blocked"
+)
+CONFLICTING_EXPORT_PRICE = (
+    "conflicting final sale prices for the same Pioneers product"
+)
+AMBIGUOUS_EXPORT_PRODUCT = (
+    "selected Pioneers product cannot be identified uniquely"
 )
 
 
@@ -167,12 +170,15 @@ def _classify_source(unit: str | None, basis: str | None) -> str:
     return "unresolved"
 
 
-def _classify_target(unit: str | None, confirmed_basis: str | None) -> str:
-    if unit and unit.strip():
-        return _classify_unit_text(unit.strip()) or "unresolved"
-    if confirmed_basis in {"meter", "piece"}:
-        return confirmed_basis
-    return "unresolved"
+def _classify_target(unit: str | None) -> str | None:
+    """Return a unit kind, ``unresolved`` for an unknown label, or None if absent.
+
+    A Pioneers workbook has no unit column. Missing unit is not a blocker:
+    length and packaging stay in the product name and are not multiplied in.
+    """
+    if not unit or not unit.strip():
+        return None
+    return _classify_unit_text(unit.strip()) or "unresolved"
 
 
 def _source_phrase(kind: str) -> str:
@@ -183,27 +189,12 @@ def _target_phrase(kind: str, unit: str | None) -> str:
     if unit and unit.strip():
         return repr(unit.strip())
     if kind == "meter":
-        return "the confirmed per-metre sale basis"
+        return "per metre"
     if kind == "piece":
-        return "the confirmed per-piece sale basis"
+        return "per piece"
+    if kind == "branch":
+        return "per branch"
     return "an unresolved unit"
-
-
-def normalize_sale_policy(
-    currency: str | None, basis: str | None
-) -> tuple[str | None, str | None]:
-    """Accept only an explicit Rial confirmation and an explicit metre or piece basis.
-
-    Any other value, including a blank workbook, stays unconfirmed. Toman→Rial
-    conversion belongs in the supplier processor (Decimal), not here. Metres are
-    never converted into a branch unit.
-    """
-    confirmed_currency = (currency or "").strip().lower()
-    confirmed_basis = (basis or "").strip().lower()
-    return (
-        confirmed_currency if confirmed_currency == "rial" else None,
-        confirmed_basis if confirmed_basis in {"meter", "piece"} else None,
-    )
 
 
 def compatibility_blockers(
@@ -212,21 +203,22 @@ def compatibility_blockers(
     price_basis: str | None,
     source_currency: str | None,
     target_unit: str | None,
-    confirmed_currency: str | None,
-    confirmed_basis: str | None,
 ) -> list[str]:
-    """Hard blocks for a matched row. Package quantities are never read."""
-    currency, basis = normalize_sale_policy(confirmed_currency, confirmed_basis)
+    """Hard blocks for a matched row. Package quantities are never read.
+
+    Pioneers sale currency is always Rial. Supplier processors convert Toman
+    before this check. A blank workbook unit does not block export.
+    """
     blockers: list[str] = []
     source_kind = _classify_source(source_unit, price_basis)
-    target_kind = _classify_target(target_unit, basis)
+    target_kind = _classify_target(target_unit)
     if source_kind == "unresolved":
         blockers.append(SOURCE_BASIS_UNRESOLVED)
-    elif source_kind == "printed":
-        # Reliable price column identified; printed Rial amount is the sale price.
+    elif source_kind == "printed" or target_kind is None:
+        # Printed amount, or no unit column: use the final Rial price as-is.
         pass
     elif target_kind == "unresolved":
-        blockers.append(TARGET_BASIS_UNRESOLVED)
+        blockers.append(TARGET_UNIT_UNRECOGNISED)
     elif source_kind != target_kind:
         blockers.append(
             "price basis: supplier price is "
@@ -238,12 +230,11 @@ def compatibility_blockers(
     stated = (source_currency or "").strip().lower()
     if not stated:
         blockers.append(SUPPLIER_CURRENCY_MISSING)
-    elif currency is None:
-        blockers.append(CURRENCY_UNRESOLVED)
-    elif stated != currency:
+    elif stated != PIONEERS_SALE_CURRENCY:
         blockers.append(
             "sale currency: supplier currency "
-            f"{stated} does not match confirmed Pioneers currency {currency}; "
+            f"{stated} does not match confirmed Pioneers currency "
+            f"{PIONEERS_SALE_CURRENCY}; "
             "no conversion was applied and automatic export is blocked"
         )
     return blockers
@@ -253,8 +244,6 @@ def apply_sale_compatibility(
     candidate: UpdateCandidate,
     *,
     target_unit: str | None,
-    confirmed_currency: str | None,
-    confirmed_basis: str | None,
 ) -> UpdateCandidate:
     """Replace currency/basis blockers. Other restrictions stay in place."""
     fresh = compatibility_blockers(
@@ -262,8 +251,6 @@ def apply_sale_compatibility(
         price_basis=candidate.price_basis,
         source_currency=candidate.source_currency,
         target_unit=target_unit,
-        confirmed_currency=confirmed_currency,
-        confirmed_basis=confirmed_basis,
     )
     blockers = [item for item in candidate.pricing_blockers if not _compatibility_text(item)]
     for item in fresh:
@@ -322,3 +309,46 @@ def to_final_sale_updates(
             )
         )
     return updates
+
+
+def _export_identity(update: FinalSalePriceUpdate) -> tuple[str, str]:
+    """Stable Pioneers identity: product code, otherwise the product name."""
+    code = (update.pioneers_code or "").strip()
+    if code:
+        return ("code", code)
+    return ("name", " ".join(update.pioneers_name.split()))
+
+
+def assemble_export_updates(
+    candidates: Sequence[UpdateCandidate],
+) -> list[FinalSalePriceUpdate]:
+    """One update per approved Pioneers product.
+
+    Identical prices for the same product collapse to a single row. Different
+    prices, or more than one source row for that identity, reject the export.
+    """
+    grouped: dict[tuple[str, str], list[FinalSalePriceUpdate]] = {}
+    order: list[tuple[str, str]] = []
+    for update in to_final_sale_updates(candidates):
+        key = _export_identity(update)
+        if key not in grouped:
+            order.append(key)
+            grouped[key] = []
+        grouped[key].append(update)
+
+    selected: list[FinalSalePriceUpdate] = []
+    for key in order:
+        group = grouped[key]
+        rows = {item.row_number for item in group}
+        prices = {item.final_sale_price for item in group}
+        label = group[0].pioneers_code or group[0].pioneers_name
+        if len(rows) != 1:
+            raise ValueError(
+                f"{AMBIGUOUS_EXPORT_PRODUCT}: {label} "
+                f"(rows {', '.join(str(row) for row in sorted(rows))})"
+            )
+        if len(prices) != 1:
+            rendered = ", ".join(str(price) for price in sorted(prices, key=str))
+            raise ValueError(f"{CONFLICTING_EXPORT_PRICE}: {label} ({rendered})")
+        selected.append(group[0])
+    return selected

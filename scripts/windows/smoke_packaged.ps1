@@ -427,12 +427,10 @@ function Invoke-ConfirmedMetreExport {
 
     $null = Invoke-Json -Method PUT -Url "$Base/api/settings" -Body @{
         settings = @{
-            pioneers_sale_currency = "rial"
-            pioneers_sale_basis = "meter"
             suspicious_percent_threshold = "30"
         }
     }
-    Write-Host "OK confirmed Rial per-metre sale policy"
+    Write-Host "OK warning-threshold setting"
 
     $sourceSha = Get-FileSha256 $ExcelPath
     $session = Invoke-Json -Method POST -Url "$Base/api/sessions"

@@ -122,6 +122,7 @@ export interface ExportResponse {
   session_id: string
   output_filename: string
   updated_count: number
+  exported_row_count: number
   download_path: string
 }
 

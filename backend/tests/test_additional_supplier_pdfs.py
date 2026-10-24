@@ -137,8 +137,6 @@ def test_top_converts_toman_to_rial_for_export(top_result) -> None:
         [item],
         [product],
         processor=processor,
-        confirmed_sale_currency="rial",
-        confirmed_sale_basis="piece",
     )
     enriched = apply_price_warnings(matched.candidates)
     assert enriched[0].status == "MATCHED"
@@ -215,8 +213,6 @@ def test_dina_fitting_na_column_is_exportable_rial_price(dina_result) -> None:
         [item],
         [product],
         processor=DinaPolymerProcessor(),
-        confirmed_sale_currency="rial",
-        confirmed_sale_basis="piece",
     )
     enriched = apply_price_warnings(matched.candidates)
     assert enriched[0].status == "MATCHED"
@@ -388,7 +384,6 @@ def test_newpipe_preserves_mixed_fraction_male_female_dimensions(newpipe_result)
         [male_large, male_small],
         products,
         processor=NewPipeProcessor(),
-        confirmed_sale_currency="rial",
     )
     enriched = apply_price_warnings(matched.candidates)
     assert len(enriched) == 2
@@ -436,7 +431,6 @@ def test_newpipe_single_labelled_reducing_caps_keep_distinct_sizes(
         [smaller, larger],
         products,
         processor=NewPipeProcessor(),
-        confirmed_sale_currency="rial",
     )
     enriched = apply_price_warnings(matched.candidates)
     assert len(enriched) == 2

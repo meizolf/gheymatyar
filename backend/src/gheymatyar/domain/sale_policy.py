@@ -1,27 +1,29 @@
-"""Confirmed Pioneers sale-column policy.
+"""Fixed Pioneers sale-column policy.
 
-User-confirmed business rule: ``نرخ فروش اصلی`` is stored and exported in
-**Rial**. Supplier processors may print other currencies; conversion into
-this column must use ``Decimal`` and keep the original amount/currency in
-item metadata.
+``نرخ فروش اصلی`` is always stored and exported in Rial. TOP Industrial and
+Kian print Toman and convert with ``TOMAN_TO_RIAL`` exactly once. Other
+supported suppliers keep their confirmed printed or per-unit amounts.
+
+Length, metre, branch, roll, and package counts belong in the product name.
+Prices are never multiplied by those quantities, and there is no currency or
+price-basis setting.
 """
 
 from __future__ import annotations
 
 from decimal import Decimal
 
-#: Confirmed currency of the Pioneers final-sale column.
+#: Currency of the Pioneers final-sale column. Always Rial.
 PIONEERS_SALE_CURRENCY = "rial"
 
-#: Setting key for the confirmed Pioneers sale currency.
-SETTING_SALE_CURRENCY_KEY = "pioneers_sale_currency"
-
-#: Setting key for the confirmed sale basis when the workbook has no unit.
-SETTING_SALE_BASIS_KEY = "pioneers_sale_basis"
-
-#: Toman → Rial factor for suppliers that print Toman (e.g. TOP Industrial).
+#: Toman → Rial factor for suppliers that print Toman (TOP Industrial, Kian).
 TOMAN_TO_RIAL = Decimal("10")
 
-#: Price basis meaning: use the printed amount as the sale price as-is.
-#: Package length / carton quantity must not be multiplied in.
+#: Use the printed amount as the sale price. Do not multiply by length or pack.
 PRICE_BASIS_PRINTED = "printed"
+
+#: Legacy SQLite keys. Startup deletes them. They are not settings anymore.
+OBSOLETE_SETTING_KEYS = (
+    "pioneers_sale_currency",
+    "pioneers_sale_basis",
+)

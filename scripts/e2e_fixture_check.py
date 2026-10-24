@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """End-to-end API check against real fixtures (no browser).
 
-Azin prices stay blocked until their source basis is an explicit metre or piece
-price. A separate Dina per-metre row is exported only after Rial per-metre is
-confirmed, and only that sale cell may change.
+Azin printed prices are already Rial, so a matched row can be approved and
+exported. Unmatched approval, and an export with nothing eligible, stay
+rejected. A Dina per-metre row is exported at its printed Rial amount, and the
+file contains only that approved product row.
 """
 
 from __future__ import annotations
@@ -49,49 +50,115 @@ def _upload(client: TestClient, session_id: str, excel: Path, pdf: Path, supplie
     assert pdf_resp.status_code == 200, pdf_resp.text
 
 
-def _assert_azin_export_rejected(client: TestClient) -> None:
+def _assert_status(response, status: int) -> None:
+    assert response.status_code == status, response.text
+
+
+def _assert_azin_printed_rial_export(client: TestClient, work_dir: Path) -> None:
     session_id = client.post("/api/sessions").json()["session_id"]
     _upload(client, session_id, EXCEL, AZIN_PDF, "azin_pipe")
-    match = client.post(f"/api/sessions/{session_id}/match")
-    assert match.status_code == 200, match.text
-    preview = client.get(f"/api/sessions/{session_id}/preview").json()["candidates"]
-    matched = [row for row in preview if row["status"] == "MATCHED"]
-    assert matched, "expected a matched Azin row"
-    assert all(row["exportable"] is False for row in matched)
-    approved = client.post(
-        f"/api/sessions/{session_id}/candidates/{matched[0]['candidate_id']}/review",
+    _assert_status(client.post(f"/api/sessions/{session_id}/match"), 200)
+    preview = client.get(f"/api/sessions/{session_id}/candidates").json()["candidates"]
+    # A large printed-price move is a soft warning. Approval may override it.
+    # A pricing blocker may not.
+    eligible = [
+        row
+        for row in preview
+        if row["status"] == "MATCHED"
+        and not row.get("pricing_blockers")
+        and row.get("new_price") not in {None, "", row.get("old_price")}
+    ]
+    assert eligible, "expected a matched Azin printed-Rial row"
+    unmatched = next((row for row in preview if row["status"] == "UNMATCHED"), None)
+    assert unmatched is not None, "expected an unmatched row for the restriction check"
+    refused = client.post(
+        f"/api/sessions/{session_id}/candidates/{unmatched['candidate_id']}/review",
         json={"decision": "APPROVE"},
     )
-    assert approved.status_code == 400, approved.text
+    _assert_status(refused, 400)
+
+    target = eligible[0]
+    approved = client.post(
+        f"/api/sessions/{session_id}/candidates/{target['candidate_id']}/review",
+        json={"decision": "APPROVE"},
+    )
+    _assert_status(approved, 200)
+    assert approved.json()["exportable"] is True
+    assert not approved.json()["pricing_blockers"]
+
+    for row in preview:
+        if row["candidate_id"] == target["candidate_id"]:
+            continue
+        excluded = client.post(
+            f"/api/sessions/{session_id}/candidates/{row['candidate_id']}/review",
+            json={"decision": "EXCLUDE"},
+        )
+        _assert_status(excluded, 200)
+
     exported = client.post(f"/api/sessions/{session_id}/export")
-    assert exported.status_code == 400, exported.text
+    _assert_status(exported, 200)
+    assert exported.json()["updated_count"] == 1
+    assert exported.json()["exported_row_count"] == 1
     download = client.get(f"/api/sessions/{session_id}/download")
-    assert download.status_code == 404
-    print("Azin unresolved export rejected")
+    _assert_status(download, 200)
+    output = work_dir / "azin_export.xlsx"
+    output.write_bytes(download.content)
+    written = _sale_cell_for_code(output, target["pioneers_code"])
+    assert Decimal(str(written)) == Decimal(approved.json()["new_price"])
+    original_book = load_workbook(EXCEL, data_only=False)
+    exported_book = load_workbook(output, data_only=False)
+    try:
+        original_sheet = original_book.active
+        exported_sheet = exported_book.active
+        assert exported_sheet.max_row == 2
+        headers = {cell.value: cell.column for cell in original_sheet[1]}
+        sale_column = headers[HEADER_SALE_PRICE]
+        code_column = headers["کد کالا"]
+        source_row = int(target["row_number"])
+        for column in range(1, original_sheet.max_column + 1):
+            source_value = original_sheet.cell(source_row, column).value
+            exported_value = exported_sheet.cell(2, column).value
+            if column == sale_column:
+                assert exported_value != source_value
+                continue
+            assert exported_value == source_value
+        assert exported_sheet.cell(2, code_column).value == target["pioneers_code"]
+    finally:
+        original_book.close()
+        exported_book.close()
+
+    blocked = client.post("/api/sessions").json()["session_id"]
+    _upload(client, blocked, EXCEL, AZIN_PDF, "azin_pipe")
+    _assert_status(client.post(f"/api/sessions/{blocked}/match"), 200)
+    blocked_rows = client.get(f"/api/sessions/{blocked}/candidates").json()["candidates"]
+    for row in blocked_rows:
+        excluded = client.post(
+            f"/api/sessions/{blocked}/candidates/{row['candidate_id']}/review",
+            json={"decision": "EXCLUDE"},
+        )
+        _assert_status(excluded, 200)
+    rejected = client.post(f"/api/sessions/{blocked}/export")
+    _assert_status(rejected, 400)
+    assert client.get(f"/api/sessions/{blocked}/download").status_code == 404
+    print("Azin printed-Rial export wrote one sale cell; empty export rejected")
 
 
-def _sale_cell(path: Path, row_number: int):
+def _sale_cell_for_code(path: Path, pioneers_code: str):
     workbook = load_workbook(path, data_only=False)
     try:
         sheet = workbook.active
         headers = {cell.value: cell.column for cell in sheet[1]}
-        return sheet.cell(row_number, headers[HEADER_SALE_PRICE]).value
+        code_column = headers["کد کالا"]
+        sale_column = headers[HEADER_SALE_PRICE]
+        for row in range(2, (sheet.max_row or 1) + 1):
+            if sheet.cell(row, code_column).value == pioneers_code:
+                return sheet.cell(row, sale_column).value
+        raise AssertionError(f"exported file is missing code {pioneers_code}")
     finally:
         workbook.close()
 
 
 def _assert_dina_metre_export(client: TestClient, work_dir: Path) -> None:
-    settings = client.put(
-        "/api/settings",
-        json={
-            "settings": {
-                "pioneers_sale_currency": "rial",
-                "pioneers_sale_basis": "meter",
-            }
-        },
-    )
-    assert settings.status_code == 200, settings.text
-
     session_id = client.post("/api/sessions").json()["session_id"]
     _upload(client, session_id, EXCEL, DINA_PDF, "dina_polymer")
     match = client.post(f"/api/sessions/{session_id}/match")
@@ -138,15 +205,27 @@ def _assert_dina_metre_export(client: TestClient, work_dir: Path) -> None:
     exported = client.post(f"/api/sessions/{session_id}/export")
     assert exported.status_code == 200, exported.text
     assert exported.json()["updated_count"] >= 1
+    assert exported.json()["exported_row_count"] == exported.json()["updated_count"]
     download = client.get(f"/api/sessions/{session_id}/download")
     assert download.status_code == 200
     assert len(download.content) > 1000
     output = work_dir / "dina_export.xlsx"
     output.write_bytes(download.content)
-    written = _sale_cell(output, row_number)
+    written = _sale_cell_for_code(output, body["pioneers_code"])
     assert Decimal(str(written)) == Decimal(body["new_price"])
-    original = _sale_cell(EXCEL, row_number)
+    original_book = load_workbook(EXCEL, data_only=False)
+    try:
+        sheet = original_book.active
+        headers = {cell.value: cell.column for cell in sheet[1]}
+        original = sheet.cell(row_number, headers[HEADER_SALE_PRICE]).value
+    finally:
+        original_book.close()
     assert Decimal(str(written)) != Decimal(str(original))
+    exported_book = load_workbook(output, data_only=False)
+    try:
+        assert exported_book.active.max_row == 1 + int(exported.json()["exported_row_count"])
+    finally:
+        exported_book.close()
 
     mappings = client.get("/api/suppliers/dina_polymer/mappings")
     assert mappings.status_code == 200, mappings.text
@@ -171,7 +250,7 @@ def main() -> int:
             suppliers = client.get("/api/suppliers").json()
             assert any(item["key"] == "azin_pipe" for item in suppliers)
             assert any(item["key"] == "dina_polymer" for item in suppliers)
-            _assert_azin_export_rejected(client)
+            _assert_azin_printed_rial_export(client, Path(tmp))
             _assert_dina_metre_export(client, Path(tmp))
             print("E2E fixture workflow OK")
             return 0

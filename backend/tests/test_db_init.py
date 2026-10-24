@@ -103,3 +103,58 @@ def test_existing_name_mappings_survive_decision_table(tmp_path: Path) -> None:
         assert loaded.pioneers_code == "11307"
         assert loaded.mapping_type == MappingType.MANUAL.value
     database.engine.dispose()
+
+
+def test_obsolete_sale_settings_are_removed_without_resetting_user_data(
+    tmp_path: Path,
+) -> None:
+    from gheymatyar.db.database import init_db
+    from gheymatyar.domain import MappingType
+    from gheymatyar.repositories import (
+        MappingRepository,
+        ProductDecisionRepository,
+        SettingsRepository,
+        SupplierRepository,
+    )
+
+    database = Database(f"sqlite:///{tmp_path / 'kept.db'}")
+    database.create_tables()
+    with database.session() as session:
+        supplier_id = SupplierRepository(session).create(
+            name="کیان", parser_type="kian"
+        ).id
+        mapping = MappingRepository(session).create(
+            supplier_id=supplier_id,
+            supplier_name_raw="شیلنگ کیان",
+            pioneers_name_raw="شیلنگ کیان",
+            pioneers_code="416",
+            mapping_type=MappingType.MANUAL,
+        )
+        ProductDecisionRepository(session).ignore(
+            supplier_id=supplier_id,
+            supplier_name_raw="حذف‌شده",
+            supplier_name_normalized="حذف شده",
+            supplier_code="999",
+            unit="عدد",
+        )
+        SettingsRepository(session).set("suspicious_percent_threshold", "18")
+        SettingsRepository(session).set("pioneers_sale_currency", "rial")
+        SettingsRepository(session).set("pioneers_sale_basis", "meter")
+        mapping_id = mapping.id
+
+    init_db(database.engine)
+    init_db(database.engine)
+
+    with database.session() as session:
+        settings = SettingsRepository(session)
+        assert settings.get("pioneers_sale_currency") is None
+        assert settings.get("pioneers_sale_basis") is None
+        assert settings.get("suspicious_percent_threshold").value == "18"
+        loaded = MappingRepository(session).get_by_id(mapping_id)
+        assert loaded.pioneers_code == "416"
+        assert loaded.pioneers_name_raw == "شیلنگ کیان"
+        ignored = ProductDecisionRepository(session).list_for_supplier(supplier_id)
+        assert len(ignored) == 1
+        assert ignored[0].decision == "IGNORED"
+        assert ignored[0].supplier_code == "999"
+    database.engine.dispose()

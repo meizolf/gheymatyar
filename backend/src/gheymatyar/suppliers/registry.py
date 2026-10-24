@@ -16,6 +16,7 @@ from gheymatyar.suppliers.detection import (
 )
 from gheymatyar.suppliers.dina_polymer import DinaPolymerProcessor
 from gheymatyar.suppliers.errors import SupplierPdfError, UnsupportedSupplierError
+from gheymatyar.suppliers.kian import KianProcessor
 from gheymatyar.suppliers.newpipe import NewPipeProcessor
 from gheymatyar.suppliers.top_industrial import TopIndustrialProcessor
 
@@ -109,5 +110,6 @@ def get_default_registry() -> SupplierProcessorRegistry:
         registry.register(DinaPolymerProcessor())
         registry.register(NewPipeProcessor())
         registry.register(AbrahanPipeProcessor())
+        registry.register(KianProcessor())
         _DEFAULT = registry
     return _DEFAULT

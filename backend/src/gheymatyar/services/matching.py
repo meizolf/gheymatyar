@@ -202,6 +202,32 @@ def _saved_identity(mapping: SavedNameMapping) -> str | None:
     return None
 
 
+def item_decision_identities(
+    processor: BaseSupplierProcessor, item: SupplierPriceItem
+) -> list[str]:
+    """Current identity, then prior name identities for the same code and unit.
+
+    A prior name is never matched by supplier code alone.
+    """
+    current = supplier_product_identity(
+        normalized_name=processor.normalize_supplier_name(item.supplier_name),
+        supplier_code=item.supplier_code,
+        unit=item.unit,
+    )
+    identities = [current]
+    for name in processor.prior_normalized_names(item):
+        if not name or not str(name).strip():
+            continue
+        ident = supplier_product_identity(
+            normalized_name=str(name).strip(),
+            supplier_code=item.supplier_code,
+            unit=item.unit,
+        )
+        if ident not in identities:
+            identities.append(ident)
+    return identities
+
+
 def match_supplier_items(
     items: Sequence[SupplierPriceItem],
     products: Sequence[PioneersProduct],
@@ -210,8 +236,6 @@ def match_supplier_items(
     saved_mappings: Iterable[SavedNameMapping] = (),
     ignored_identities: Iterable[str] = (),
     suggestion_pool_limit: int = 8,
-    confirmed_sale_currency: str | None = None,
-    confirmed_sale_basis: str | None = None,
 ) -> MatchResult:
     """Match supplier items to Pioneers products by name.
 
@@ -266,12 +290,8 @@ def match_supplier_items(
         extras = [NAME_COLLISION_BLOCKER] if supplier_name in collisions else []
         blockers = _hard_blockers(item, extras)
         provenance = _provenance(item, blockers)
-        identity = supplier_product_identity(
-            normalized_name=supplier_name,
-            supplier_code=item.supplier_code,
-            unit=item.unit,
-        )
-        if identity in ignored:
+        identities = item_decision_identities(processor, item)
+        if any(key in ignored for key in identities):
             result.candidates.append(
                 UpdateCandidate(
                     candidate_id=candidate_id,
@@ -295,7 +315,7 @@ def match_supplier_items(
             continue
 
         # 1) Saved mapping — ahead of exact and fuzzy matches.
-        saved = scoped.get(identity)
+        saved = next((scoped[key] for key in identities if key in scoped), None)
         legacy_hits = legacy_by_name.get(supplier_name, [])
         if saved is None and legacy_hits:
             suggestions: list[dict[str, object]] = []
@@ -405,11 +425,9 @@ def match_supplier_items(
                             review_decision=ReviewDecision.INCLUDE,
                             warnings=list(blockers),
                             **provenance,
-                        ),
-                        target_unit=resolved.unit,
-                        confirmed_currency=confirmed_sale_currency,
-                        confirmed_basis=confirmed_sale_basis,
-                    )
+                    ),
+                    target_unit=resolved.unit,
+                )
                 )
                 result.matched_count += 1
                 continue
@@ -472,8 +490,6 @@ def match_supplier_items(
                         **provenance,
                     ),
                     target_unit=product.unit,
-                    confirmed_currency=confirmed_sale_currency,
-                    confirmed_basis=confirmed_sale_basis,
                 )
             )
             result.matched_count += 1

@@ -74,12 +74,33 @@ describe('ExportStep', () => {
       session_id: 'sess-1',
       output_filename: 'out.xlsx',
       updated_count: 3,
+      exported_row_count: 3,
       download_path: '/api/sessions/sess-1/download',
     })
     await waitFor(() => {
       expect(api.downloadExcel).toHaveBeenCalled()
     })
-    expect(await screen.findByText(/3 ردیف به‌روز شد/)).toBeInTheDocument()
+    expect(await screen.findByText(/3 ردیف محصول/)).toBeInTheDocument()
+  })
+
+  it('does not show success when the exported row count disagrees', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.exportExcel).mockResolvedValue({
+      session_id: 'sess-1',
+      output_filename: 'out.xlsx',
+      updated_count: 9,
+      exported_row_count: 6700,
+      download_path: '/api/sessions/sess-1/download',
+    })
+    renderExport()
+    await user.click(
+      await screen.findByRole('button', { name: /تولید و دانلود اکسل/ }),
+    )
+    expect(
+      await screen.findByText(/با انتخاب تأییدشده یکی نیست/),
+    ).toBeInTheDocument()
+    expect(api.downloadExcel).not.toHaveBeenCalled()
+    expect(screen.queryByText(/ردیف محصول/)).not.toBeInTheDocument()
   })
 
   it('shows API failure messages', async () => {

@@ -18,6 +18,8 @@ from typing import Any
 
 from sqlalchemy import Engine, inspect, text
 
+from gheymatyar.domain.sale_policy import OBSOLETE_SETTING_KEYS
+
 logger = logging.getLogger(__name__)
 
 LEGACY_MAPPINGS_TABLE = "product_mappings_legacy_code"
@@ -78,6 +80,7 @@ def migrate_schema(engine: Engine) -> list[str]:
     """
     notes: list[str] = []
     with _migration_transaction(engine) as conn:
+        notes.extend(_purge_obsolete_settings(conn))
         notes.extend(_recover_interrupted_variant_upgrade(conn))
         inspect(conn).clear_cache()
         inspector = inspect(conn)
@@ -116,6 +119,26 @@ def migrate_schema(engine: Engine) -> list[str]:
             )
         # New empty name-based table is created by subsequent create_all().
     return notes
+
+
+def _purge_obsolete_settings(conn: Any) -> list[str]:
+    """Delete retired sale-policy keys. Mappings and decisions are not touched.
+
+    Safe to run on every startup. A missing ``settings`` table is a no-op so
+    this can run before ``create_all``.
+    """
+    if "settings" not in set(inspect(conn).get_table_names()):
+        return []
+    removed = 0
+    for key in OBSOLETE_SETTING_KEYS:
+        result = conn.execute(
+            text("DELETE FROM settings WHERE key = :key"),
+            {"key": key},
+        )
+        removed += int(result.rowcount or 0)
+    if not removed:
+        return []
+    return [f"removed {removed} obsolete sale-policy setting key(s)"]
 
 
 def _table_names(conn: Any) -> set[str]:

@@ -1,17 +1,18 @@
-"""Write resolved final sale prices into an existing Pioneers workbook.
+"""Write approved final sale prices into a Pioneers-compatible workbook.
 
-The writer loads the original workbook with openpyxl and changes only the
-``نرخ فروش اصلی`` cell of each requested product. It never rebuilds the
-workbook and never saves over the source file.
+The writer loads the original workbook with openpyxl and keeps only the
+product rows named by the update list. Within each retained row it changes
+only the ``نرخ فروش اصلی`` cell. Unselected product rows are removed, not
+hidden. The source file is never saved.
 
 The product sheet is chosen from its headers, not from a fixed sheet title.
 Exactly one worksheet must contain ``کد کالا``, ``نـــام کــالا``, and
-``نرخ فروش اصلی`` once each on row 1. Row count is not limited.
+``نرخ فروش اصلی`` once each on row 1.
 
-Each update names a row in that current workbook. The writer checks the
-product name on that row, and the product code when one was supplied, then
-writes ``نرخ فروش اصلی`` in whichever column carries that header. In the
-inspected export that header is column AK; the header is what selects the cell.
+Each update names a row in the source workbook. The writer checks the product
+name on that row, and the product code when one was supplied, then writes
+``نرخ فروش اصلی`` in whichever column carries that header. In the inspected
+export that header is column AK; the header is what selects the cell.
 
 This operation stays in memory and in the workbook files. It does not stage
 the product list in SQLite. Prices are whole-number text such as ``4610000``.
@@ -85,6 +86,7 @@ class ExcelUpdateResult:
     source_path: str
     output_path: str
     updated_count: int
+    exported_row_count: int
     changes: tuple[SalePriceChange, ...]
 
 
@@ -132,11 +134,19 @@ def update_final_sale_prices(
             source=source,
         )
         _apply_prices(worksheet, planned, price_column=price_column)
-        _publish_workbook(
+        _retain_approved_product_rows(
+            workbook,
+            worksheet,
+            [row_number for _update, row_number, _old in planned],
+        )
+        exported_row_count = _publish_workbook(
             workbook,
             output,
             planned,
+            source=source,
             sheet_name=worksheet.title,
+            name_column=name_column,
+            code_column=code_column,
             price_column=price_column,
         )
     finally:
@@ -147,6 +157,7 @@ def update_final_sale_prices(
         source_path=str(source.resolve()),
         output_path=str(output.resolve()),
         updated_count=len(planned),
+        exported_row_count=exported_row_count,
         changes=tuple(
             SalePriceChange(
                 row_number=row_number,
@@ -219,23 +230,60 @@ def _parse_updates(
         )
 
     parsed: list[FinalSalePriceUpdate] = []
-    seen: dict[int, Decimal] = {}
+    seen_rows: dict[int, FinalSalePriceUpdate] = {}
     for index, item in enumerate(updates):
         update = _coerce_update(item, index)
-        previous = seen.get(update.row_number)
+        previous = seen_rows.get(update.row_number)
         if previous is not None:
+            if previous.final_sale_price != update.final_sale_price:
+                raise DuplicateUpdateError(
+                    "conflicting final sale prices for the same Pioneers product",
+                    row=update.row_number,
+                    pioneers_code=update.pioneers_code,
+                    reason=(
+                        f"row {update.row_number} is requested at "
+                        f"{previous.final_sale_price} and {update.final_sale_price}"
+                    ),
+                )
+            continue
+        seen_rows[update.row_number] = update
+        parsed.append(update)
+    _reject_ambiguous_identities(parsed)
+    return parsed
+
+
+def _reject_ambiguous_identities(updates: Sequence[FinalSalePriceUpdate]) -> None:
+    """One source row per product code, and per name when no code was given."""
+    by_code: dict[str, FinalSalePriceUpdate] = {}
+    by_name: dict[str, FinalSalePriceUpdate] = {}
+    for update in updates:
+        code = (update.pioneers_code or "").strip()
+        if code:
+            previous = by_code.get(code)
+            if previous is not None and previous.row_number != update.row_number:
+                raise DuplicateUpdateError(
+                    "selected Pioneers product cannot be identified uniquely",
+                    row=update.row_number,
+                    pioneers_code=code,
+                    reason=(
+                        f"code {code} is on rows "
+                        f"{previous.row_number} and {update.row_number}"
+                    ),
+                )
+            by_code[code] = update
+            continue
+        name = _normalize_identity_text(update.pioneers_name)
+        previous_name = by_name.get(name)
+        if previous_name is not None and previous_name.row_number != update.row_number:
             raise DuplicateUpdateError(
-                "Duplicate final sale price update",
+                "selected Pioneers product cannot be identified uniquely",
                 row=update.row_number,
-                pioneers_code=update.pioneers_code,
                 reason=(
-                    f"row {update.row_number} is requested more than once "
-                    f"({previous} and {update.final_sale_price})"
+                    f"name {update.pioneers_name!r} is on rows "
+                    f"{previous_name.row_number} and {update.row_number}"
                 ),
             )
-        seen[update.row_number] = update.final_sale_price
-        parsed.append(update)
-    return parsed
+        by_name[name] = update
 
 
 def _coerce_update(
@@ -691,14 +739,130 @@ def _price_as_pioneers_text(amount: Decimal) -> str:
     return text
 
 
+def _retain_approved_product_rows(
+    workbook: Workbook,
+    worksheet: Worksheet,
+    keep_rows: Sequence[int],
+) -> None:
+    """Drop every product row that was not approved and clear stale artifacts.
+
+    Approved rows stay in their original order and move up under the header.
+    Hidden rows, blank rows, tables, filters, and named ranges that pointed at
+    the full product list are removed so Pioneers cannot import them.
+    """
+    keep = set(keep_rows)
+    if not keep or len(keep) != len(keep_rows):
+        raise PioneersExcelWriteError(
+            "selected Pioneers product cannot be identified uniquely",
+            sheet=worksheet.title,
+            reason="approved rows are missing or repeated",
+        )
+    _clear_sheet_artifacts(worksheet)
+    _unmerge_ranges_outside_kept_rows(worksheet, keep)
+    max_row = worksheet.max_row or HEADER_ROW
+    row = max_row
+    while row > HEADER_ROW:
+        if row in keep:
+            row -= 1
+            continue
+        end = row
+        while row > HEADER_ROW and row not in keep:
+            row -= 1
+        worksheet.delete_rows(row + 1, end - row)
+    expected_max = HEADER_ROW + len(keep)
+    actual_max = worksheet.max_row or HEADER_ROW
+    if actual_max > expected_max:
+        worksheet.delete_rows(expected_max + 1, actual_max - expected_max)
+    _unhide_used_rows(worksheet)
+    _drop_sheet_defined_names(workbook, worksheet.title)
+
+
+def _clear_sheet_artifacts(worksheet: Worksheet) -> None:
+    for name in list(worksheet.tables):
+        del worksheet.tables[name]
+    worksheet.auto_filter.ref = None
+    if worksheet.data_validations is not None:
+        worksheet.data_validations.dataValidation = []
+    rules = getattr(worksheet.conditional_formatting, "_cf_rules", None)
+    if rules:
+        for sqref in list(rules):
+            del worksheet.conditional_formatting[sqref]
+    worksheet.print_area = None
+    worksheet.print_title_rows = None
+
+
+def _unmerge_ranges_outside_kept_rows(worksheet: Worksheet, keep: set[int]) -> None:
+    for merged in list(worksheet.merged_cells.ranges):
+        rows = set(range(merged.min_row, merged.max_row + 1))
+        if rows <= {HEADER_ROW}:
+            continue
+        if len(rows) == 1 and rows <= keep:
+            continue
+        worksheet.unmerge_cells(str(merged))
+
+
+def _unhide_used_rows(worksheet: Worksheet) -> None:
+    max_row = worksheet.max_row or HEADER_ROW
+    for index in range(1, max_row + 1):
+        if index in worksheet.row_dimensions:
+            worksheet.row_dimensions[index].hidden = False
+    for index in list(worksheet.row_dimensions):
+        if isinstance(index, int) and index > max_row:
+            del worksheet.row_dimensions[index]
+
+
+def _drop_sheet_defined_names(workbook: Workbook, sheet_name: str) -> None:
+    quoted = f"'{sheet_name}'"
+    plain = f"{sheet_name}!"
+    doomed: list[str] = []
+    for name in list(workbook.defined_names):
+        definition = workbook.defined_names[name]
+        text = definition.attr_text or ""
+        if quoted in text or plain in text:
+            doomed.append(name)
+    for name in doomed:
+        del workbook.defined_names[name]
+
+
+def _cell_is_blank(value: object) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _product_row_count(worksheet: Worksheet) -> int:
+    max_row = worksheet.max_row or HEADER_ROW
+    max_col = worksheet.max_column or 1
+    count = 0
+    for row_idx in range(HEADER_ROW + 1, max_row + 1):
+        if row_idx in worksheet.row_dimensions and worksheet.row_dimensions[row_idx].hidden:
+            raise PioneersExcelWriteError(
+                "exported workbook still has a hidden product row",
+                sheet=worksheet.title,
+                row=row_idx,
+            )
+        values = [
+            worksheet.cell(row_idx, column).value for column in range(1, max_col + 1)
+        ]
+        if all(_cell_is_blank(value) for value in values):
+            raise PioneersExcelWriteError(
+                "exported workbook still has a blank product row",
+                sheet=worksheet.title,
+                row=row_idx,
+            )
+        count += 1
+    return count
+
+
 def _publish_workbook(
     workbook: Workbook,
     output: Path,
     planned: Sequence[tuple[FinalSalePriceUpdate, int, Decimal | None]],
     *,
+    source: Path,
     sheet_name: str,
+    name_column: int,
+    code_column: int,
     price_column: int,
-) -> None:
+) -> int:
     """Save to a temp file in the destination directory, then link it into place.
 
     ``os.link`` fails if the final path already exists, so a racing create
@@ -722,10 +886,13 @@ def _publish_workbook(
         os.close(fd)
         temp_path = Path(raw_name)
         workbook.save(temp_path)
-        _verify_published_prices(
+        exported_row_count = _verify_published_workbook(
             temp_path,
+            source,
             planned,
             sheet_name=sheet_name,
+            name_column=name_column,
+            code_column=code_column,
             price_column=price_column,
         )
         try:
@@ -739,39 +906,259 @@ def _publish_workbook(
     finally:
         if temp_path is not None and temp_path.exists():
             temp_path.unlink()
+    return exported_row_count
 
 
-def _verify_published_prices(
+def _verify_published_workbook(
     path: Path,
+    source: Path,
     planned: Sequence[tuple[FinalSalePriceUpdate, int, Decimal | None]],
     *,
     sheet_name: str,
+    name_column: int,
+    code_column: int,
     price_column: int,
-) -> None:
-    workbook = load_workbook(path, read_only=False, data_only=False)
+) -> int:
+    """Re-open the saved file and require exactly the approved product rows."""
+    saved = load_workbook(path, read_only=False, data_only=False)
+    original = load_workbook(source, read_only=False, data_only=False)
     try:
-        if sheet_name not in workbook.sheetnames:
+        if sheet_name not in saved.sheetnames:
             raise PioneersExcelWriteError(
                 "Saved workbook is missing the Pioneers product sheet",
                 filename=path,
                 sheet=sheet_name,
             )
-        worksheet = workbook[sheet_name]
-        for update, row_number, _old in planned:
-            cell = worksheet.cell(row_number, price_column)
-            expected = _price_as_pioneers_text(update.final_sale_price)
-            if cell.value != expected:
+        if saved.sheetnames != original.sheetnames:
+            raise PioneersExcelWriteError(
+                "Saved workbook changed the worksheet list",
+                filename=path,
+                reason=f"expected {original.sheetnames}, found {saved.sheetnames}",
+            )
+        worksheet = saved[sheet_name]
+        source_sheet = original[sheet_name]
+        if list(worksheet.tables):
+            raise PioneersExcelWriteError(
+                "Saved workbook still contains a product table",
+                filename=path,
+                sheet=sheet_name,
+            )
+        _assert_no_sheet_defined_names(saved, sheet_name, path)
+        _assert_headers_match(source_sheet, worksheet, path)
+        exported_rows = _product_row_count(worksheet)
+        if exported_rows != len(planned):
+            raise PioneersExcelWriteError(
+                "exported product row count does not match the approved selection",
+                filename=path,
+                sheet=sheet_name,
+                reason=f"expected {len(planned)} product rows, found {exported_rows}",
+            )
+        located = _locate_exported_rows(
+            worksheet,
+            planned,
+            name_column=name_column,
+            code_column=code_column,
+            path=path,
+        )
+        for update, source_row, output_row in located:
+            _assert_retained_row(
+                source_sheet,
+                worksheet,
+                update,
+                source_row=source_row,
+                output_row=output_row,
+                price_column=price_column,
+                path=path,
+            )
+        for name in original.sheetnames:
+            if name == sheet_name:
+                continue
+            _assert_sheet_values_match(original[name], saved[name], path)
+        return exported_rows
+    finally:
+        saved.close()
+        original.close()
+
+
+def _assert_no_sheet_defined_names(
+    workbook: Workbook, sheet_name: str, path: Path
+) -> None:
+    quoted = f"'{sheet_name}'"
+    plain = f"{sheet_name}!"
+    for name in workbook.defined_names:
+        text = workbook.defined_names[name].attr_text or ""
+        if quoted in text or plain in text:
+            raise PioneersExcelWriteError(
+                "Saved workbook still has a named range on the product sheet",
+                filename=path,
+                sheet=sheet_name,
+                reason=name,
+            )
+
+
+def _assert_headers_match(source: Worksheet, output: Worksheet, path: Path) -> None:
+    source_cols = source.max_column or 1
+    output_cols = output.max_column or 1
+    if source_cols != output_cols:
+        raise PioneersExcelWriteError(
+            "Saved workbook changed the Pioneers column count",
+            filename=path,
+            reason=f"expected {source_cols} columns, found {output_cols}",
+        )
+    for column in range(1, source_cols + 1):
+        expected = source.cell(HEADER_ROW, column).value
+        found = output.cell(HEADER_ROW, column).value
+        if expected != found:
+            raise PioneersExcelWriteError(
+                "Saved workbook changed a Pioneers header",
+                filename=path,
+                column=get_column_letter(column),
+                reason=f"expected {expected!r}, found {found!r}",
+            )
+
+
+def _sheet_text(value: object) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _locate_exported_rows(
+    worksheet: Worksheet,
+    planned: Sequence[tuple[FinalSalePriceUpdate, int, Decimal | None]],
+    *,
+    name_column: int,
+    code_column: int,
+    path: Path,
+) -> list[tuple[FinalSalePriceUpdate, int, int]]:
+    """Find each approved update in the filtered sheet.
+
+    A code locates the row when the update has one. An update without a code
+    locates the row by product name, including when that sheet row still has
+    its original code.
+    """
+    max_row = worksheet.max_row or HEADER_ROW
+    rows: list[tuple[int, str, str]] = []
+    seen_codes: dict[str, int] = {}
+    for row_idx in range(HEADER_ROW + 1, max_row + 1):
+        code_text = _sheet_text(worksheet.cell(row_idx, code_column).value)
+        name_text = _sheet_text(worksheet.cell(row_idx, name_column).value)
+        if code_text:
+            if code_text in seen_codes:
+                raise PioneersExcelWriteError(
+                    "selected Pioneers product cannot be identified uniquely",
+                    filename=path,
+                    row=row_idx,
+                    pioneers_code=code_text,
+                )
+            seen_codes[code_text] = row_idx
+        rows.append((row_idx, code_text, name_text))
+
+    located: list[tuple[FinalSalePriceUpdate, int, int]] = []
+    used: set[int] = set()
+    for update, source_row, _old in planned:
+        code = (update.pioneers_code or "").strip()
+        if code:
+            output_row = seen_codes.get(code)
+            if output_row is None:
+                raise PioneersExcelWriteError(
+                    "Saved workbook is missing an approved product row",
+                    filename=path,
+                    pioneers_code=code,
+                    reason=update.pioneers_name,
+                )
+        else:
+            name_key = _normalize_identity_text(update.pioneers_name)
+            matches = [
+                row_idx
+                for row_idx, _code_text, name_text in rows
+                if _normalize_identity_text(name_text) == name_key
+            ]
+            if len(matches) != 1:
+                raise PioneersExcelWriteError(
+                    "selected Pioneers product cannot be identified uniquely",
+                    filename=path,
+                    reason=update.pioneers_name,
+                )
+            output_row = matches[0]
+        if output_row in used:
+            raise PioneersExcelWriteError(
+                "selected Pioneers product cannot be identified uniquely",
+                filename=path,
+                row=output_row,
+                pioneers_code=update.pioneers_code,
+            )
+        used.add(output_row)
+        located.append((update, source_row, output_row))
+    if len(used) != len(rows):
+        raise PioneersExcelWriteError(
+            "exported product row count does not match the approved selection",
+            filename=path,
+            reason=f"expected {len(used)} product rows, found {len(rows)}",
+        )
+    return located
+
+
+def _assert_retained_row(
+    source: Worksheet,
+    output: Worksheet,
+    update: FinalSalePriceUpdate,
+    *,
+    source_row: int,
+    output_row: int,
+    price_column: int,
+    path: Path,
+) -> None:
+    max_col = source.max_column or 1
+    expected_price = _price_as_pioneers_text(update.final_sale_price)
+    for column in range(1, max_col + 1):
+        source_value = source.cell(source_row, column).value
+        output_value = output.cell(output_row, column).value
+        if column == price_column:
+            if output_value != expected_price:
                 raise PioneersExcelWriteError(
                     "Saved workbook does not contain the requested final sale price",
                     filename=path,
-                    sheet=sheet_name,
-                    row=row_number,
-                    column=get_column_letter(cell.column) if isinstance(cell.column, int) else None,
+                    row=output_row,
+                    column=get_column_letter(column),
                     pioneers_code=update.pioneers_code,
-                    reason=f"expected {expected!r}, found {cell.value!r}",
+                    reason=f"expected {expected_price!r}, found {output_value!r}",
                 )
-    finally:
-        workbook.close()
+            continue
+        if output_value != source_value:
+            raise PioneersExcelWriteError(
+                "Saved workbook changed a field other than نرخ فروش اصلی",
+                filename=path,
+                row=output_row,
+                column=get_column_letter(column),
+                pioneers_code=update.pioneers_code,
+                reason=f"expected {source_value!r}, found {output_value!r}",
+            )
+
+
+def _assert_sheet_values_match(source: Worksheet, output: Worksheet, path: Path) -> None:
+    if (source.max_row, source.max_column) != (output.max_row, output.max_column):
+        raise PioneersExcelWriteError(
+            "Saved workbook changed a non-product sheet",
+            filename=path,
+            sheet=source.title,
+        )
+    max_row = source.max_row or 1
+    max_col = source.max_column or 1
+    for row_idx in range(1, max_row + 1):
+        for column in range(1, max_col + 1):
+            left = source.cell(row_idx, column).value
+            right = output.cell(row_idx, column).value
+            if left != right:
+                raise PioneersExcelWriteError(
+                    "Saved workbook changed a non-product sheet",
+                    filename=path,
+                    sheet=source.title,
+                    row=row_idx,
+                    column=get_column_letter(column),
+                )
 
 
 __all__ = [

@@ -78,6 +78,7 @@ describe('api client', () => {
         session_id: 's1',
         output_filename: 'out.xlsx',
         updated_count: 1,
+        exported_row_count: 1,
         download_path: '/api/sessions/s1/download',
       }),
     })
