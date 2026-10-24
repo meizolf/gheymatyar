@@ -34,6 +34,14 @@ from gheymatyar.suppliers.errors import SupplierPdfError, UnsupportedSupplierErr
 router = APIRouter(tags=["sessions"])
 
 
+def _validation_detail(exc: Exception) -> str:
+    """Use the exception text, never an empty API error body."""
+    detail = str(exc).strip()
+    if detail:
+        return detail
+    return "the workbook could not be validated for export"
+
+
 def _summary(service: ProcessingService, session_id: str) -> SessionSummaryResponse:
     session = service.get_session(session_id)
     return SessionSummaryResponse(**service.preview_summary(session))
@@ -413,9 +421,9 @@ def export_excel(
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=_validation_detail(exc)) from exc
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=_validation_detail(exc)) from exc
     if result.exported_row_count != result.updated_count:
         raise HTTPException(
             status_code=400,
@@ -428,6 +436,7 @@ def export_excel(
         output_filename=Path(result.output_path).name,
         updated_count=result.updated_count,
         exported_row_count=result.exported_row_count,
+        content_sha256=result.content_sha256,
         download_path=f"/api/sessions/{session_id}/download",
     )
 
@@ -439,7 +448,9 @@ def download_excel(
     db: Session = Depends(get_db_session),
 ) -> Response:
     try:
-        content, download_name = service.read_fresh_workbook(session_id, db)
+        content, download_name, row_count, digest = service.read_fresh_workbook(
+            session_id, db
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
     except FileNotFoundError as exc:
@@ -456,5 +467,9 @@ def download_excel(
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": disposition},
+        headers={
+            "Content-Disposition": disposition,
+            "X-Exported-Row-Count": str(row_count),
+            "X-Export-Content-Sha256": digest,
+        },
     )

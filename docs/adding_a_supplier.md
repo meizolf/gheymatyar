@@ -20,7 +20,8 @@ price interpretation clear, stop and ask for clarification.
 
 ## Confirmed pricing policy
 
-- Pioneers `نرخ فروش اصلی` is **Rial** (`gheymatyar.domain.sale_policy.PIONEERS_SALE_CURRENCY`).
+- Pioneers `نرخ فروش اصلی` is always **Rial** (`gheymatyar.domain.sale_policy.PIONEERS_SALE_CURRENCY`). Do not add a currency or price-basis setting.
+- Export writes only rows with an explicit approval and a numerically different price. Default inclusion is not approval.
 - Keep monetary values as `Decimal`. Put original supplier currency and amount
   in `raw_values` (`original_currency`, `original_price`).
 - Set `raw_values["currency"]` to the currency of the **exported** sale price
@@ -31,8 +32,8 @@ price interpretation clear, stop and ask for clarification.
 - Put hard export restrictions in `raw_values["pricing_blockers"]` /
   `review_warnings`. Soft notes alone must not use those keys if export should
   proceed.
-- Override `calculate_final_sale_price` only for explicit rules (e.g. TOP
-  Toman → Rial `× 10`).
+- Override `calculate_final_sale_price` only for explicit rules (TOP and Kian:
+  Toman → Rial `× 10`, once). Do not multiply by length or package quantity.
 
 ## Minimal implementation
 

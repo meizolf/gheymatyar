@@ -137,7 +137,7 @@ Retain the published `GheymatYarSetup.exe` together with its `sha256` and byte s
 | `.xlsx` Excel + Azin PDF → export | Yes |
 | HTML-based `.xls` + PDF → export | Yes |
 | Source file SHA unchanged | Yes |
-| Export: only `نرخ فروش اصلی` cells change (xlsx) | Yes (`compare_export.py`) |
+| Export: approved changed rows only; within them only `نرخ فروش اصلی` changes | Yes (`compare_export.py`) |
 | Export sale-price cell matches candidate (xls) | Yes |
 | Explicit mapping save + EXE restart + same mapping | Yes |
 | Sanitized PATH (no VS redist dirs) | Yes |

@@ -72,7 +72,7 @@ def test_review_exclude_invalidates_previous_export(
             supplier_id="azin_pipe",
             supplier_name=product.name,
             supplier_code="819121020",
-            price=product.sale_price or Decimal("1000"),
+            price=(product.sale_price or Decimal("1000")) + Decimal("100"),
             unit="عدد",
             raw_values={"currency": "rial", "price_basis": "piece", "page": 1},
         )

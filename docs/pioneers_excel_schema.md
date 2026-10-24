@@ -213,7 +213,7 @@ Barcodes are **identifiers**, never money/quantities:
 
 Observed storage in this converted file: **all price cells are strings of integer amounts** (number format `General`). No formulas were found in price columns. No decimal points observed.
 
-**Confirmed business rule:** `نرخ فروش اصلی` (`sale_price`, column AK) is stored and exported in **Rial**. GheymatYar never writes any other column. Supplier Toman amounts (e.g. TOP) are converted with Decimal `× 10` before export; original supplier currency/amount remain in metadata only.
+**Confirmed business rule:** `نرخ فروش اصلی` (`sale_price`, column AK) is always **Rial**. That is fixed; the settings page only stores the warning threshold. An export keeps the Pioneers headers and column order, deletes every product row that was not explicitly approved, and writes a new whole-number text price only when it differs from the current cell. Other cells on a retained row stay as they were. TOP and Kian convert Toman with Decimal `× 10` once. Length, branch, roll, and package quantities are not multipliers. This schema check does not include an import back into the Pioneers application.
 
 | Header | Col | Index | Maps to | Blank | Zero | Negative | Notes |
 |---|---|---|---|---|---|---|---|

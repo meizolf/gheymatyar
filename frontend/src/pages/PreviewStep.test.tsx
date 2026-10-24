@@ -123,6 +123,24 @@ describe('PreviewStep', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('approves a normal changed row for export', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.setReview).mockResolvedValue({
+      ...candidatesResponseFixture.candidates[0],
+      review_decision: 'APPROVE',
+      exportable: true,
+    })
+    renderPreview()
+    const row = (await screen.findAllByRole('row')).find((r) =>
+      within(r).queryByText('محصول الف'),
+    )!
+    expect(within(row).getByText('نیاز به تأیید')).toBeInTheDocument()
+    await user.click(within(row).getByRole('button', { name: 'تأیید برای خروجی' }))
+    await waitFor(() => {
+      expect(api.setReview).toHaveBeenCalledWith('sess-1', 'c1', 'APPROVE')
+    })
+  })
+
   it('approves warned updates', async () => {
     const user = userEvent.setup()
     vi.mocked(api.setReview).mockResolvedValue({

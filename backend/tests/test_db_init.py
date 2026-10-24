@@ -158,3 +158,20 @@ def test_obsolete_sale_settings_are_removed_without_resetting_user_data(
         assert ignored[0].decision == "IGNORED"
         assert ignored[0].supplier_code == "999"
     database.engine.dispose()
+
+    copied = tmp_path / "copied.db"
+    copied.write_bytes((tmp_path / "kept.db").read_bytes())
+    restarted = Database(f"sqlite:///{copied}")
+    init_db(restarted.engine)
+    with restarted.session() as session:
+        settings = SettingsRepository(session)
+        assert settings.get("pioneers_sale_currency") is None
+        assert settings.get("pioneers_sale_basis") is None
+        assert settings.get("suspicious_percent_threshold").value == "18"
+        loaded = MappingRepository(session).get_by_id(mapping_id)
+        assert loaded is not None
+        assert loaded.pioneers_code == "416"
+        ignored = ProductDecisionRepository(session).list_for_supplier(supplier_id)
+        assert len(ignored) == 1
+        assert ignored[0].supplier_code == "999"
+    restarted.engine.dispose()

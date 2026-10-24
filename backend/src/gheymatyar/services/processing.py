@@ -78,6 +78,8 @@ def _safe_filename(name: str, *, default: str) -> str:
 
 
 _EXPORT_FINGERPRINT_KEY = "export_decision_fingerprint"
+_EXPORT_ROW_COUNT_KEY = "export_row_count"
+_EXPORT_SHA_KEY = "export_content_sha256"
 # Persisted mapping token for each session-only or manual override, keyed by
 # supplier-product identity. An unrelated ignore must not refresh these.
 _MANUAL_BASIS_KEY = "manual_override_basis"
@@ -158,6 +160,24 @@ def _invalidate_export(session: ProcessingSession) -> None:
         except OSError:
             pass
     session.output_path = None
+    session.metadata.pop(_EXPORT_ROW_COUNT_KEY, None)
+    session.metadata.pop(_EXPORT_SHA_KEY, None)
+
+
+def _bound_export(
+    session: ProcessingSession, data: bytes
+) -> tuple[bytes, str, int, str] | None:
+    """Return download bytes only when their hash and row count are the recorded export."""
+    recorded_sha = session.metadata.get(_EXPORT_SHA_KEY)
+    recorded_count = session.metadata.get(_EXPORT_ROW_COUNT_KEY)
+    digest = hashlib.sha256(data).hexdigest()
+    if (
+        not isinstance(recorded_sha, str)
+        or not isinstance(recorded_count, int)
+        or digest != recorded_sha
+    ):
+        return None
+    return data, _download_name(session), recorded_count, digest
 
 
 def _clear_match_state(session: ProcessingSession) -> None:
@@ -800,7 +820,7 @@ class ProcessingService:
 
     def read_fresh_workbook(
         self, session_id: str, db_session: Session
-    ) -> tuple[bytes, str]:
+    ) -> tuple[bytes, str, int, str]:
         """Return export bytes that match the current SQLite decisions.
 
         A missing workbook stays a not-found result so an in-session review
@@ -827,18 +847,23 @@ class ProcessingService:
                     and session.output_path.is_file()
                 ):
                     data = session.output_path.read_bytes()
-                    if self._workbook_stamp(session, db_session) == recorded:
-                        return data, _download_name(session)
+                    served = _bound_export(session, data)
+                    if (
+                        served is not None
+                        and self._workbook_stamp(session, db_session) == recorded
+                    ):
+                        return served
                 try:
                     self._export_excel_unlocked(session, db_session)
                 except _DecisionsChanged:
                     continue
                 if session.output_path is not None and session.output_path.is_file():
                     data = session.output_path.read_bytes()
-                    if session.metadata.get(_EXPORT_FINGERPRINT_KEY) == (
-                        self._workbook_stamp(session, db_session)
-                    ):
-                        return data, _download_name(session)
+                    served = _bound_export(session, data)
+                    if served is not None and session.metadata.get(
+                        _EXPORT_FINGERPRINT_KEY
+                    ) == (self._workbook_stamp(session, db_session)):
+                        return served
             raise ValueError(
                 "export changed while it was being prepared; retry download"
             )
@@ -983,6 +1008,12 @@ class ProcessingService:
             session.metadata[_EXPORT_FINGERPRINT_KEY] = workbook_decision_stamp(
                 fingerprint_after, session.candidates
             )
+        digest = hashlib.sha256(output.read_bytes()).hexdigest()
+        if digest != result.content_sha256:
+            _invalidate_export(session)
+            raise ValueError("exported workbook does not match the recorded content")
+        session.metadata[_EXPORT_ROW_COUNT_KEY] = result.exported_row_count
+        session.metadata[_EXPORT_SHA_KEY] = digest
         session.output_path = output
         return result
 

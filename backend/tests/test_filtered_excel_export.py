@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 from decimal import Decimal
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -87,6 +88,16 @@ def _expand_real_catalog(destination: Path) -> list[dict[str, object]]:
             attr_text=f"'{PRODUCT_SHEET_NAME}'!$A$2:$AN${INPUT_ROWS + 1}",
         )
     )
+    hidden = workbook.create_sheet("کاتالوگ پنهان")
+    hidden.sheet_state = "veryHidden"
+    hidden["A1"] = "نسخه پنهان"
+    hidden["A2"] = HEADER_CODE
+    hidden["B2"] = HEADER_NAME
+    hidden["C2"] = HEADER_SALE_PRICE
+    for row_number in range(2, INPUT_ROWS + 2):
+        hidden.cell(row_number + 1, 1).value = sheet.cell(row_number, code_col).value
+        hidden.cell(row_number + 1, 2).value = sheet.cell(row_number, name_col).value
+        hidden.cell(row_number + 1, 3).value = sheet.cell(row_number, sale_col).value
     workbook.save(destination)
     workbook.close()
 
@@ -112,6 +123,50 @@ def _expand_real_catalog(destination: Path) -> list[dict[str, object]]:
         workbook.close()
     assert len(selected) == 9
     return selected
+
+
+def _product_codes(path: Path) -> list[str]:
+    """Code of every product record on every sheet, including hidden catalogs."""
+    workbook = load_workbook(path, data_only=False)
+    found: list[str] = []
+    try:
+        for sheet in workbook.worksheets:
+            header_row = None
+            code_column = None
+            for row_number in range(1, (sheet.max_row or 1) + 1):
+                values = {
+                    str(sheet.cell(row_number, column).value).strip(): column
+                    for column in range(1, (sheet.max_column or 1) + 1)
+                    if isinstance(sheet.cell(row_number, column).value, str)
+                }
+                if (
+                    HEADER_CODE in values
+                    and HEADER_NAME in values
+                    and HEADER_SALE_PRICE in values
+                ):
+                    header_row = row_number
+                    code_column = values[HEADER_CODE]
+                    break
+            if header_row is None or code_column is None:
+                continue
+            for row_number in range(header_row + 1, (sheet.max_row or header_row) + 1):
+                value = sheet.cell(row_number, code_column).value
+                if value is not None and str(value).strip():
+                    found.append(str(value).strip())
+        return found
+    finally:
+        workbook.close()
+
+
+def _assert_package_omits(path: Path, token: str) -> None:
+    import zipfile
+
+    with zipfile.ZipFile(path) as archive:
+        for name in archive.namelist():
+            if not name.endswith(".xml"):
+                continue
+            payload = archive.read(name).decode("utf-8", errors="replace")
+            assert f">{token}<" not in payload, name
 
 
 def _product_rows(path: Path) -> list[tuple[object, ...]]:
@@ -169,6 +224,18 @@ def test_six_thousand_seven_hundred_rows_export_exactly_nine(
                 assert exported[column] == source_value
     rejected_code = "200003"
     assert rejected_code not in codes
+    saved = load_workbook(output)
+    try:
+        hidden = saved["کاتالوگ پنهان"]
+        assert hidden.sheet_state == "veryHidden"
+        assert hidden["A1"].value == "نسخه پنهان"
+        assert hidden["A2"].value == HEADER_CODE
+        assert hidden.max_row == 2
+        assert all(hidden.cell(row, 1).value in (None, "") for row in range(3, 12))
+    finally:
+        saved.close()
+    assert _product_codes(output) == codes
+    _assert_package_omits(output, rejected_code)
     assert _sha256(source) == before
     assert _sha256(FIXTURE) == fixture_hash
 
@@ -304,6 +371,58 @@ def test_service_exports_only_approved_rows_from_the_large_catalog(
         for product in session.products
         if product.row_number not in APPROVED_SOURCE_ROWS and product.code
     )
+    untouched = [
+        product
+        for product in session.products
+        if product.row_number not in APPROVED_SOURCE_ROWS
+        and product.code
+        and product.code != ignored_product.code
+        and product.row_number not in session.duplicate_codes.get(product.code, ())
+    ]
+    include_a, include_b, unchanged_product = untouched[:3]
+    for index, product in enumerate((include_a, include_b)):
+        candidates.append(
+            UpdateCandidate(
+                candidate_id=f"include-{index}",
+                row_number=product.row_number,
+                pioneers_code=product.code,
+                pioneers_name=product.name,
+                supplier_code=f"INC{index}",
+                supplier_name=product.name or f"include-{index}",
+                old_price=product.sale_price,
+                new_price=(product.sale_price or Decimal("1000")) + Decimal("50"),
+                absolute_change=Decimal("50"),
+                percentage_change=Decimal("5"),
+                match_type=None,
+                status=MatchStatus.MATCHED,
+                review_decision=ReviewDecision.INCLUDE,
+                warnings=[],
+                suggestions=[],
+                source_currency="rial",
+                price_basis="printed",
+            )
+        )
+    candidates.append(
+        UpdateCandidate(
+            candidate_id="unchanged",
+            row_number=unchanged_product.row_number,
+            pioneers_code=unchanged_product.code,
+            pioneers_name=unchanged_product.name,
+            supplier_code="SAME",
+            supplier_name=unchanged_product.name or "same",
+            old_price=unchanged_product.sale_price,
+            new_price=unchanged_product.sale_price,
+            absolute_change=Decimal("0"),
+            percentage_change=Decimal("0"),
+            match_type=None,
+            status=MatchStatus.MATCHED,
+            review_decision=ReviewDecision.APPROVE,
+            warnings=[],
+            suggestions=[],
+            source_currency="rial",
+            price_basis="printed",
+        )
+    )
     candidates.append(
         UpdateCandidate(
             candidate_id="ignored",
@@ -356,6 +475,10 @@ def test_service_exports_only_approved_rows_from_the_large_catalog(
     codes = {row[3] for row in rows}
     assert codes == {item["pioneers_code"] for item in selected}
     assert ignored_product.code not in codes
+    assert include_a.code not in codes
+    assert include_b.code not in codes
+    assert unchanged_product.code not in codes
+    _assert_package_omits(session.output_path, str(include_a.code))
     assert _sha256(source) == before
     assert _sha256(FIXTURE) == fixture_hash
 
@@ -414,4 +537,138 @@ def test_service_blocks_conflicting_prices_and_empty_selection(
     with pytest.raises(ValueError, match="no approved updates"):
         service.export_excel(session.session_id)
     assert not (session.work_dir / "pioneers_updated.xlsx").exists()
+
+    session.candidates = [candidate("plain", "2000", ReviewDecision.INCLUDE)]
+    with pytest.raises(ValueError, match="no approved updates"):
+        service.export_excel(session.session_id)
+    assert not (session.work_dir / "pioneers_updated.xlsx").exists()
+
+    same_price = str(product.sale_price)
+    session.candidates = [candidate("same", same_price, ReviewDecision.APPROVE)]
+    with pytest.raises(ValueError, match="no approved updates"):
+        service.export_excel(session.session_id)
+    assert not (session.work_dir / "pioneers_updated.xlsx").exists()
+    assert _sha256(source) == before
+
+
+def _approve_one_changed_row(client, source: Path) -> tuple[str, object]:
+    created = client.post("/api/sessions")
+    assert created.status_code == 200, created.text
+    session_id = created.json()["session_id"]
+    with source.open("rb") as handle:
+        uploaded = client.post(
+            f"/api/sessions/{session_id}/pioneers-excel",
+            files={
+                "file": (
+                    "p.xlsx",
+                    handle,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+    assert uploaded.status_code == 200, uploaded.text
+    session = client.app.state.processing.get_session(session_id)
+    product = next(
+        item
+        for item in session.products
+        if item.code
+        and item.sale_price is not None
+        and session.duplicate_codes.get(item.code, (item.row_number,))
+        == (item.row_number,)
+    )
+    session.supplier_confirmed = True
+    session.candidates = [
+        UpdateCandidate(
+            candidate_id="approved",
+            row_number=product.row_number,
+            pioneers_code=product.code,
+            pioneers_name=product.name,
+            supplier_code="API",
+            supplier_name=product.name or "API",
+            old_price=product.sale_price,
+            new_price=product.sale_price + Decimal("50"),
+            absolute_change=Decimal("50"),
+            percentage_change=Decimal("1"),
+            match_type=None,
+            status=MatchStatus.MATCHED,
+            review_decision=ReviewDecision.APPROVE,
+            warnings=[],
+            suggestions=[],
+            source_currency="rial",
+            price_basis="printed",
+        )
+    ]
+    return session_id, product
+
+
+def test_api_drops_partial_hidden_catalog(client, tmp_path: Path) -> None:
+    source = tmp_path / "partial.xlsx"
+    shutil.copy2(FIXTURE, source)
+    workbook = load_workbook(source)
+    hidden = workbook.create_sheet("هویت ناقص")
+    hidden.sheet_state = "veryHidden"
+    hidden["A1"] = "یادداشت"
+    hidden["A2"] = HEADER_CODE
+    hidden["B2"] = HEADER_NAME
+    hidden["C2"] = "قیمت"
+    hidden["A3"] = "ARCH-0001"
+    hidden["B3"] = "Arch product"
+    hidden["C3"] = "10"
+    workbook.save(source)
+    workbook.close()
+    before = _sha256(source)
+    session_id, _product = _approve_one_changed_row(client, source)
+    exported = client.post(f"/api/sessions/{session_id}/export")
+    assert exported.status_code == 200, exported.text
+    assert exported.json()["exported_row_count"] == 1
+    download = client.get(f"/api/sessions/{session_id}/download")
+    assert download.status_code == 200, download.text
+    assert download.headers["x-exported-row-count"] == "1"
+    saved = load_workbook(BytesIO(download.content))
+    try:
+        hidden = saved["هویت ناقص"]
+        assert hidden.sheet_state == "veryHidden"
+        assert hidden["A2"].value == HEADER_CODE
+        assert hidden.max_row == 2
+        for sheet in saved.worksheets:
+            for row in sheet.iter_rows():
+                for cell in row:
+                    assert cell.value != "ARCH-0001"
+        assert saved[PRODUCT_SHEET_NAME].max_row == 2
+    finally:
+        saved.close()
+    assert b"ARCH-0001" not in download.content
+    assert _sha256(source) == before
+
+
+def test_api_exports_workbook_with_spaced_headers(client, tmp_path: Path) -> None:
+    source = tmp_path / "spaced.xlsx"
+    shutil.copy2(FIXTURE, source)
+    workbook = load_workbook(source)
+    sheet = workbook[PRODUCT_SHEET_NAME]
+    code_header = f" {sheet['D1'].value} "
+    name_header = f" {sheet['E1'].value} "
+    sheet["D1"] = code_header
+    sheet["E1"] = name_header
+    workbook.save(source)
+    workbook.close()
+    before = _sha256(source)
+    session_id, product = _approve_one_changed_row(client, source)
+    exported = client.post(f"/api/sessions/{session_id}/export")
+    assert exported.status_code == 200, exported.text
+    body = exported.json()
+    assert body["exported_row_count"] == 1
+    assert body["updated_count"] == 1
+    download = client.get(f"/api/sessions/{session_id}/download")
+    assert download.status_code == 200, download.text
+    assert download.headers["x-exported-row-count"] == "1"
+    saved = load_workbook(BytesIO(download.content))
+    try:
+        exported_sheet = saved[PRODUCT_SHEET_NAME]
+        assert exported_sheet["D1"].value == code_header
+        assert exported_sheet["E1"].value == name_header
+        assert str(exported_sheet["D2"].value) == str(product.code)
+        assert exported_sheet.max_row == 2
+    finally:
+        saved.close()
     assert _sha256(source) == before

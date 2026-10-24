@@ -151,6 +151,7 @@ class ExportResponse(BaseModel):
     output_filename: str
     updated_count: int
     exported_row_count: int
+    content_sha256: str
     download_path: str
 
 

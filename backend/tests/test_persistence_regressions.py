@@ -99,7 +99,11 @@ def _db_path(client) -> str:
 
 def test_stale_download_does_not_return_deleted_price(client, tmp_path: Path) -> None:
     sid, _keep, drop = setup_rows(client, tmp_path)
-    assert client.post(f"/api/sessions/{sid}/export").status_code == 200
+    exported = client.post(f"/api/sessions/{sid}/export")
+    assert exported.status_code == 200, exported.text
+    original_count = exported.json()["exported_row_count"]
+    assert original_count == 2
+    assert exported.json()["content_sha256"]
     other = _upload_and_match(client, tmp_path / "named.xlsx", PDF)
     rows = client.get(f"/api/sessions/{other}/candidates").json()["candidates"]
     target = next(row for row in rows if row["supplier_code"] == drop["supplier_code"])
@@ -117,6 +121,12 @@ def test_stale_download_does_not_return_deleted_price(client, tmp_path: Path) ->
 
     download = client.get(f"/api/sessions/{sid}/download")
     assert download.status_code == 200, download.text
+    assert download.headers["x-exported-row-count"] == "1"
+    assert download.headers["x-exported-row-count"] != str(original_count)
+    assert download.headers["x-export-content-sha256"] == hashlib.sha256(
+        download.content
+    ).hexdigest()
+    assert download.headers["x-export-content-sha256"] != exported.json()["content_sha256"]
     workbook = load_workbook(BytesIO(download.content))
     sheet = workbook.active
     assert sheet.max_row == 2
@@ -639,6 +649,12 @@ def test_restore_preserves_unrelated_exclusion(client, tmp_path: Path) -> None:
     kept = next(row for row in current if row["candidate_id"] == keep_row["candidate_id"])
     assert kept["review_decision"] == "EXCLUDE"
     assert kept["exportable"] is False
+    approved = client.post(
+        f"/api/sessions/{sid}/candidates/{restored.json()['candidate_id']}/review",
+        json={"decision": "APPROVE"},
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["exportable"] is True
     exported = client.post(f"/api/sessions/{sid}/export")
     assert exported.status_code == 200, exported.text
     downloaded = client.get(f"/api/sessions/{sid}/download")

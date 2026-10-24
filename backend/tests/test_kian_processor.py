@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from openpyxl import load_workbook
 
+from gheymatyar.domain.enums import ReviewDecision
 from gheymatyar.domain.product import PioneersProduct
 from gheymatyar.repositories import (
     MappingRepository,
@@ -194,7 +195,18 @@ def test_kian_rial_price_is_exportable_without_package_math(kian_pdf: Path) -> N
     assert enriched[0].new_price == Decimal("2608000")
     assert enriched[0].source_currency == "rial"
     assert enriched[0].pricing_blockers == []
-    assert is_exportable(enriched[0]) is True
+    assert is_exportable(enriched[0]) is False
+    unchanged = enriched[0].model_copy(
+        update={"review_decision": ReviewDecision.APPROVE}
+    )
+    assert is_exportable(unchanged) is False
+    changed = enriched[0].model_copy(
+        update={
+            "review_decision": ReviewDecision.APPROVE,
+            "old_price": Decimal("1"),
+        }
+    )
+    assert is_exportable(changed) is True
 
     gold = _by_code(KianProcessor().parse_pdf(kian_pdf))["416"]
     assert processor.calculate_final_sale_price(gold) == Decimal("9656000")

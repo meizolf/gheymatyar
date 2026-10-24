@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+import xml.etree.ElementTree as ET
+import zipfile
 from decimal import Decimal
 from pathlib import Path
 
@@ -27,6 +29,7 @@ from gheymatyar.services.errors import (
     DuplicateUpdateError,
     InvalidPriceError,
     OutputAlreadyExistsError,
+    PioneersExcelWriteError,
     ProductIdentityMismatchError,
     ProductSheetNotFoundError,
     SourceOverwriteError,
@@ -696,7 +699,7 @@ def test_unselected_rows_and_stale_ranges_are_removed(tmp_path: Path) -> None:
         sheet = workbook[PRODUCT_SHEET_NAME]
         assert sheet.max_row == 2
         assert sheet["D2"].value == "001234"
-        assert sheet["AG2"].value == "=AH3"
+        assert sheet["AG2"].value == "=AH2"
         assert sheet["AK2"].value == "920000"
         assert "A2:A3" not in {str(rng) for rng in sheet.merged_cells.ranges}
         assert sheet.freeze_panes == "D2"
@@ -713,6 +716,77 @@ def test_unselected_rows_and_stale_ranges_are_removed(tmp_path: Path) -> None:
         assert BARCODE_CODE not in codes
     finally:
         workbook.close()
+
+
+def test_retained_formula_merge_and_height_move_with_the_row(tmp_path: Path) -> None:
+    source = _copy_fixture(tmp_path)
+    workbook = load_workbook(source)
+    sheet = workbook[PRODUCT_SHEET_NAME]
+    name = sheet["E4"].value
+    code = sheet["D4"].value
+    sheet["G4"] = "=F4*2"
+    sheet.merge_cells("A4:B4")
+    sheet.row_dimensions[4].height = 44
+    workbook.save(source)
+    workbook.close()
+
+    output = tmp_path / "out.xlsx"
+    update_final_sale_prices(
+        source,
+        output,
+        [_price(4, name, Decimal("880000"), code)],
+    )
+    workbook = load_workbook(output)
+    try:
+        sheet = workbook[PRODUCT_SHEET_NAME]
+        assert sheet.max_row == 2
+        assert sheet["D2"].value == code
+        assert sheet["E2"].value == name
+        assert sheet["G2"].value == "=F2*2"
+        assert sheet.row_dimensions[2].height == 44
+        assert "A2:B2" in {str(rng) for rng in sheet.merged_cells.ranges}
+    finally:
+        workbook.close()
+
+
+def test_formula_that_depends_on_a_deleted_row_is_rejected(tmp_path: Path) -> None:
+    source = _copy_fixture(tmp_path)
+    workbook = load_workbook(source)
+    sheet = workbook[PRODUCT_SHEET_NAME]
+    name = sheet["E2"].value
+    code = sheet["D2"].value
+    sheet["G2"] = "=F8*2"
+    workbook.save(source)
+    workbook.close()
+    before = _sha256(source)
+    output = tmp_path / "out.xlsx"
+    with pytest.raises(PioneersExcelWriteError, match="not in the export"):
+        update_final_sale_prices(
+            source,
+            output,
+            [_price(2, name, Decimal("880000"), code)],
+        )
+    assert not output.exists()
+    assert _sha256(source) == before
+
+
+def test_chart_or_pivot_cache_rejects_the_workbook(tmp_path: Path) -> None:
+    from openpyxl.chart import BarChart, Reference
+
+    source = _copy_fixture(tmp_path)
+    workbook = load_workbook(source)
+    sheet = workbook[PRODUCT_SHEET_NAME]
+    chart = BarChart()
+    chart.add_data(Reference(sheet, min_col=37, min_row=1, max_row=3), titles_from_data=True)
+    sheet.add_chart(chart, "A12")
+    workbook.save(source)
+    workbook.close()
+    before = _sha256(source)
+    output = tmp_path / "out.xlsx"
+    with pytest.raises(PioneersExcelWriteError, match="chart"):
+        update_final_sale_prices(source, output, [_barcode_update()])
+    assert not output.exists()
+    assert _sha256(source) == before
 
 
 def test_formula_in_target_sale_price_cell_is_rejected(tmp_path: Path) -> None:
@@ -782,6 +856,198 @@ def test_successful_result_object(tmp_path: Path) -> None:
     assert result.changes[1].new_final_sale_price == Decimal("4950000")
 
 
+def _approved_valve(path: Path) -> dict[str, object]:
+    workbook = load_workbook(path, read_only=True)
+    try:
+        sheet = workbook[PRODUCT_SHEET_NAME]
+        return _price(2, sheet["E2"].value, Decimal("880000"), str(sheet["D2"].value))
+    finally:
+        workbook.close()
+
+
+def _add_hidden_catalog(path: Path, *, header_row: int, title: str) -> str:
+    """Copy every product onto a veryHidden sheet whose headers are not on row 1."""
+    workbook = load_workbook(path)
+    source = workbook[PRODUCT_SHEET_NAME]
+    hidden = workbook.create_sheet(title)
+    hidden.sheet_state = "veryHidden"
+    for row in range(1, header_row):
+        hidden.cell(row, 1).value = f"یادداشت {row}"
+    hidden.cell(header_row, 1).value = HEADER_CODE
+    hidden.cell(header_row, 2).value = HEADER_NAME
+    hidden.cell(header_row, 3).value = HEADER_SALE_PRICE
+    for offset, src_row in enumerate(range(2, (source.max_row or 1) + 1), start=1):
+        dest = header_row + offset
+        hidden.cell(dest, 1).value = source.cell(src_row, 4).value
+        hidden.cell(dest, 2).value = source.cell(src_row, 5).value
+        hidden.cell(dest, 3).value = source.cell(src_row, 37).value
+    excluded = str(source.cell(3, 4).value)
+    workbook.save(path)
+    workbook.close()
+    return excluded
+
+
+def _xml_product_codes(path: Path) -> list[str]:
+    """Product codes from worksheet XML identity columns, not every cell value."""
+    with zipfile.ZipFile(path) as archive:
+        assert not any(
+            name.startswith(("xl/pivot", "xl/charts/", "xl/tables/"))
+            for name in archive.namelist()
+        )
+        shared: list[str] = []
+        if "xl/sharedStrings.xml" in archive.namelist():
+            root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
+            for element in root:
+                if not element.tag.endswith("si"):
+                    continue
+                shared.append(
+                    "".join(
+                        text.text or ""
+                        for text in element.iter()
+                        if text.tag.endswith("t")
+                    )
+                )
+        codes: list[str] = []
+        for name in archive.namelist():
+            if "/worksheets/" not in name or not name.endswith(".xml"):
+                continue
+            root = ET.fromstring(archive.read(name))
+            rows: dict[int, dict[str, str]] = {}
+            for element in root.iter():
+                if not element.tag.endswith("c"):
+                    continue
+                ref = element.get("r") or ""
+                column = "".join(char for char in ref if char.isalpha())
+                row_text = "".join(char for char in ref if char.isdigit())
+                if not column or not row_text:
+                    continue
+                kind = element.get("t")
+                if kind == "inlineStr":
+                    value = "".join(
+                        text.text or ""
+                        for text in element.iter()
+                        if text.tag.endswith("t")
+                    )
+                else:
+                    raw = next(
+                        (
+                            child.text or ""
+                            for child in element
+                            if child.tag.endswith("v")
+                        ),
+                        "",
+                    )
+                    value = shared[int(raw)] if kind == "s" and raw else raw
+                rows.setdefault(int(row_text), {})[column] = value
+            header_row = None
+            code_column = None
+            for row_number, values in rows.items():
+                positions = {text.strip(): column for column, text in values.items()}
+                if HEADER_CODE in positions and HEADER_NAME in positions:
+                    header_row = row_number
+                    code_column = positions[HEADER_CODE]
+                    break
+            if header_row is None or code_column is None:
+                continue
+            for row_number in sorted(row for row in rows if row > header_row):
+                code = rows[row_number].get(code_column, "").strip()
+                if code:
+                    codes.append(code)
+        return codes
+
+
+def test_hidden_catalog_copy_does_not_double_one_approval(tmp_path: Path) -> None:
+    source = _copy_fixture(tmp_path)
+    excluded = _add_hidden_catalog(source, header_row=2, title="کاتالوگ تکراری")
+    before = _sha256(source)
+    output = tmp_path / "out.xlsx"
+    result = update_final_sale_prices(source, output, [_approved_valve(source)])
+    assert result.exported_row_count == 1
+    saved = load_workbook(output)
+    try:
+        assert saved[PRODUCT_SHEET_NAME].max_row == 2
+        hidden = saved["کاتالوگ تکراری"]
+        assert hidden.sheet_state == "veryHidden"
+        assert hidden["A1"].value == "یادداشت 1"
+        assert hidden.max_row == 2
+        assert hidden["A3"].value is None
+    finally:
+        saved.close()
+    assert _xml_product_codes(output) == ["90001"]
+    assert excluded not in _xml_product_codes(output)
+    assert _sha256(source) == before
+
+
+def test_catalog_headers_past_row_15_do_not_keep_unapproved_products(
+    tmp_path: Path,
+) -> None:
+    source = _copy_fixture(tmp_path)
+    excluded = _add_hidden_catalog(source, header_row=16, title="کاتالوگ ردیف ۱۶")
+    before = _sha256(source)
+    output = tmp_path / "out.xlsx"
+    result = update_final_sale_prices(source, output, [_approved_valve(source)])
+    assert result.exported_row_count == 1
+    saved = load_workbook(output)
+    try:
+        hidden = saved["کاتالوگ ردیف ۱۶"]
+        assert hidden.sheet_state == "veryHidden"
+        assert hidden["A16"].value == HEADER_CODE
+        assert hidden["A1"].value == "یادداشت 1"
+        assert hidden.max_row == 16
+        assert hidden["A17"].value is None
+    finally:
+        saved.close()
+    codes = _xml_product_codes(output)
+    assert codes == ["90001"]
+    assert excluded not in codes
+    with zipfile.ZipFile(output) as archive:
+        payload = "\n".join(
+            archive.read(name).decode("utf-8", errors="replace")
+            for name in archive.namelist()
+            if name.endswith(".xml") and "/worksheets/" in name
+        )
+    assert f">{excluded}<" not in payload
+    assert _sha256(source) == before
+
+
+def test_sale_price_may_equal_an_excluded_product_code(tmp_path: Path) -> None:
+    source = _copy_fixture(tmp_path)
+    workbook = load_workbook(source)
+    sheet = workbook[PRODUCT_SHEET_NAME]
+    sheet["D3"].value = "123456"
+    sheet["E3"].value = "Excluded Product 123456"
+    approved_name = sheet["E2"].value
+    workbook.save(source)
+    workbook.close()
+    before = _sha256(source)
+    output = tmp_path / "out.xlsx"
+    result = update_final_sale_prices(
+        source,
+        output,
+        [_price(2, approved_name, Decimal("123456"), "90001")],
+    )
+    assert result.exported_row_count == 1
+    saved = load_workbook(output)
+    try:
+        exported = saved[PRODUCT_SHEET_NAME]
+        assert exported.max_row == 2
+        assert exported["D2"].value == "90001"
+        assert exported["AK2"].value == "123456"
+        assert exported["E2"].value == approved_name
+    finally:
+        saved.close()
+    assert _xml_product_codes(output) == ["90001"]
+    with zipfile.ZipFile(output) as archive:
+        payload = "\n".join(
+            archive.read(name).decode("utf-8", errors="replace")
+            for name in archive.namelist()
+            if name.endswith(".xml")
+        )
+    assert ">123456<" in payload
+    assert "Excluded Product 123456" not in payload
+    assert _sha256(source) == before
+
+
 def test_model_rejects_float_money() -> None:
     with pytest.raises(ValidationError):
         FinalSalePriceUpdate(
@@ -810,3 +1076,80 @@ def test_save_failure_leaves_no_output(
     assert not output.exists()
     assert _sha256(source) == before
     assert list(tmp_path.glob(".gheymatyar-sale-price-*")) == []
+
+
+def test_partial_header_hidden_catalog_does_not_keep_unapproved_products(
+    tmp_path: Path,
+) -> None:
+    source = _copy_fixture(tmp_path)
+    workbook = load_workbook(source)
+    hidden = workbook.create_sheet("هویت ناقص")
+    hidden.sheet_state = "veryHidden"
+    hidden["A1"] = HEADER_CODE
+    hidden["B1"] = HEADER_NAME
+    hidden["C1"] = "قیمت"
+    hidden["A2"] = "ARCH-0001"
+    hidden["B2"] = "Arch product"
+    hidden["C2"] = "10"
+    workbook.save(source)
+    workbook.close()
+    before = _sha256(source)
+    output = tmp_path / "out.xlsx"
+    result = update_final_sale_prices(source, output, [_approved_valve(source)])
+    assert result.exported_row_count == 1
+    saved = load_workbook(output)
+    try:
+        assert saved[PRODUCT_SHEET_NAME].max_row == 2
+        hidden = saved["هویت ناقص"]
+        assert hidden.sheet_state == "veryHidden"
+        assert hidden["A1"].value == HEADER_CODE
+        assert hidden["C1"].value == "قیمت"
+        assert hidden.max_row == 1
+        for sheet in saved.worksheets:
+            for row in sheet.iter_rows():
+                for cell in row:
+                    assert cell.value != "ARCH-0001"
+    finally:
+        saved.close()
+    assert _xml_product_codes(output) == ["90001"]
+    with zipfile.ZipFile(output) as archive:
+        payload = "\n".join(
+            archive.read(name).decode("utf-8", errors="replace")
+            for name in archive.namelist()
+            if name.endswith(".xml") and "/worksheets/" in name
+        )
+    assert "ARCH-0001" not in payload
+    assert _sha256(source) == before
+
+
+def test_spaced_code_and_name_headers_are_preserved(tmp_path: Path) -> None:
+    source = _copy_fixture(tmp_path)
+    workbook = load_workbook(source)
+    sheet = workbook[PRODUCT_SHEET_NAME]
+    code_header = f" {sheet['D1'].value} "
+    name_header = f" {sheet['E1'].value} "
+    sheet["D1"] = code_header
+    sheet["E1"] = name_header
+    approved_name = sheet["E2"].value
+    approved_code = str(sheet["D2"].value)
+    workbook.save(source)
+    workbook.close()
+    before = _sha256(source)
+    output = tmp_path / "out.xlsx"
+    result = update_final_sale_prices(
+        source,
+        output,
+        [_price(2, approved_name, Decimal("880000"), approved_code)],
+    )
+    assert result.exported_row_count == 1
+    saved = load_workbook(output)
+    try:
+        exported = saved[PRODUCT_SHEET_NAME]
+        assert exported["D1"].value == code_header
+        assert exported["E1"].value == name_header
+        assert exported["D2"].value == approved_code
+        assert exported.max_row == 2
+    finally:
+        saved.close()
+    assert _xml_product_codes(output) == [approved_code]
+    assert _sha256(source) == before

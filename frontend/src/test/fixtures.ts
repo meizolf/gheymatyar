@@ -48,7 +48,7 @@ export const candidatesFixture: Candidate[] = [
     review_decision: 'INCLUDE',
     warnings: [],
     suggestions: [],
-    exportable: true,
+    exportable: false,
     supplier_name_normalized: 'محصول الف تامین',
   },
   {

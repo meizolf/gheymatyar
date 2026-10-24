@@ -3,6 +3,7 @@ import type {
   Candidate,
   CandidatesResponse,
   DetectSupplierResponse,
+  ExcelDownload,
   ExportResponse,
   Mapping,
   MappingsListResponse,
@@ -225,13 +226,25 @@ export const api = {
       { method: 'POST' },
     ),
 
-  downloadExcel: async (sessionId: string): Promise<Blob> => {
+  downloadExcel: async (sessionId: string): Promise<ExcelDownload> => {
     const response = await fetch(
       `${API_BASE}/sessions/${encodeURIComponent(sessionId)}/download`,
     )
     if (!response.ok) {
       throw await parseError(response)
     }
-    return response.blob()
+    const exportedRowCount = Number(response.headers.get('X-Exported-Row-Count'))
+    const contentSha256 = response.headers.get('X-Export-Content-Sha256') ?? ''
+    if (!Number.isInteger(exportedRowCount) || exportedRowCount < 1 || !contentSha256) {
+      throw new ApiError(
+        response.status,
+        'تعداد ردیف‌های فایل خروجی با انتخاب تأییدشده یکی نیست. فایل دانلود نشد.',
+      )
+    }
+    return {
+      blob: await response.blob(),
+      exportedRowCount,
+      contentSha256,
+    }
   },
 }

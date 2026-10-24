@@ -218,7 +218,11 @@ def test_dina_fitting_na_column_is_exportable_rial_price(dina_result) -> None:
     assert enriched[0].status == "MATCHED"
     assert enriched[0].pricing_blockers == []
     assert enriched[0].new_price == Decimal("67760")
-    assert is_exportable(enriched[0]) is True
+    assert is_exportable(enriched[0]) is False
+    approved = enriched[0].model_copy(
+        update={"review_decision": ReviewDecision.APPROVE, "old_price": Decimal("1")}
+    )
+    assert is_exportable(approved) is True
 
 
 def test_dina_drip_uses_gheymat_not_adjacent_na(dina_result) -> None:
@@ -389,7 +393,19 @@ def test_newpipe_preserves_mixed_fraction_male_female_dimensions(newpipe_result)
     assert len(enriched) == 2
     assert all(candidate.status == "MATCHED" for candidate in enriched)
     assert all(not candidate.pricing_blockers for candidate in enriched)
-    assert all(is_exportable(candidate) is True for candidate in enriched)
+    assert all(is_exportable(candidate) is False for candidate in enriched)
+    assert all(
+        is_exportable(
+            candidate.model_copy(
+                update={
+                    "review_decision": ReviewDecision.APPROVE,
+                    "old_price": Decimal("1"),
+                }
+            )
+        )
+        is True
+        for candidate in enriched
+    )
 
 
 def test_newpipe_single_labelled_reducing_caps_keep_distinct_sizes(
@@ -440,7 +456,19 @@ def test_newpipe_single_labelled_reducing_caps_keep_distinct_sizes(
         Decimal("7732010"),
         Decimal("8926940"),
     }
-    assert all(is_exportable(candidate) is True for candidate in enriched)
+    assert all(is_exportable(candidate) is False for candidate in enriched)
+    assert all(
+        is_exportable(
+            candidate.model_copy(
+                update={
+                    "review_decision": ReviewDecision.APPROVE,
+                    "old_price": Decimal("1"),
+                }
+            )
+        )
+        is True
+        for candidate in enriched
+    )
 
 
 def test_newpipe_genuine_name_collisions_remain_blocked() -> None:

@@ -123,7 +123,14 @@ export interface ExportResponse {
   output_filename: string
   updated_count: number
   exported_row_count: number
+  content_sha256: string
   download_path: string
+}
+
+export interface ExcelDownload {
+  blob: Blob
+  exportedRowCount: number
+  contentSha256: string
 }
 
 export interface SettingsResponse {

@@ -63,7 +63,11 @@ describe('ExportStep', () => {
           resolveExport = resolve
         }) as never,
     )
-    vi.mocked(api.downloadExcel).mockResolvedValue(new Blob(['xlsx']))
+    vi.mocked(api.downloadExcel).mockResolvedValue({
+      blob: new Blob(['xlsx']),
+      exportedRowCount: 3,
+      contentSha256: 'abc',
+    })
     renderExport()
     const btn = await screen.findByRole('button', {
       name: /تولید و دانلود اکسل/,
@@ -75,6 +79,7 @@ describe('ExportStep', () => {
       output_filename: 'out.xlsx',
       updated_count: 3,
       exported_row_count: 3,
+      content_sha256: 'abc',
       download_path: '/api/sessions/sess-1/download',
     })
     await waitFor(() => {
@@ -90,6 +95,7 @@ describe('ExportStep', () => {
       output_filename: 'out.xlsx',
       updated_count: 9,
       exported_row_count: 6700,
+      content_sha256: 'abc',
       download_path: '/api/sessions/sess-1/download',
     })
     renderExport()
@@ -101,6 +107,32 @@ describe('ExportStep', () => {
     ).toBeInTheDocument()
     expect(api.downloadExcel).not.toHaveBeenCalled()
     expect(screen.queryByText(/ردیف محصول/)).not.toBeInTheDocument()
+  })
+
+  it('does not save a download whose row count differs from the export', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.exportExcel).mockResolvedValue({
+      session_id: 'sess-1',
+      output_filename: 'out.xlsx',
+      updated_count: 9,
+      exported_row_count: 9,
+      content_sha256: 'approved-nine',
+      download_path: '/api/sessions/sess-1/download',
+    })
+    vi.mocked(api.downloadExcel).mockResolvedValue({
+      blob: new Blob(['rewritten']),
+      exportedRowCount: 8,
+      contentSha256: 'after-ignore',
+    })
+    renderExport()
+    await user.click(
+      await screen.findByRole('button', { name: /تولید و دانلود اکسل/ }),
+    )
+    expect(
+      await screen.findByText(/با انتخاب تأییدشده یکی نیست/),
+    ).toBeInTheDocument()
+    expect(URL.createObjectURL).not.toHaveBeenCalled()
+    expect(screen.queryByText(/9 ردیف محصول/)).not.toBeInTheDocument()
   })
 
   it('shows API failure messages', async () => {

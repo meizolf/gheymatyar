@@ -84,4 +84,8 @@ def test_matching_metre_units_do_not_multiply_the_price(dina_pdf) -> None:
     candidate = apply_price_warnings(matched.candidates)[0]
     assert candidate.pricing_blockers == []
     assert candidate.new_price == Decimal("909370")
-    assert is_exportable(candidate) is True
+    assert is_exportable(candidate) is False
+    approved = candidate.model_copy(
+        update={"review_decision": ReviewDecision.APPROVE, "old_price": Decimal("1")}
+    )
+    assert is_exportable(approved) is True

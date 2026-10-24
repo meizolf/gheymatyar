@@ -265,11 +265,26 @@ def apply_sale_compatibility(
     )
 
 
+def _price_is_changed(candidate: UpdateCandidate) -> bool:
+    """True only when both prices exist and are numerically different."""
+    if candidate.old_price is None or candidate.new_price is None:
+        return False
+    return candidate.old_price != candidate.new_price
+
+
 def is_exportable(candidate: UpdateCandidate) -> bool:
-    """Whether a candidate may be written into the output Excel."""
+    """Whether a candidate may be written into the output Excel.
+
+    Inclusion is the default review state and is not approval. Export requires
+    an explicit ``APPROVE`` decision and a numerically different price.
+    """
+    if candidate.review_decision != ReviewDecision.APPROVE:
+        return False
     if candidate.status != MatchStatus.MATCHED:
         return False
     if candidate.row_number is None or not candidate.pioneers_name:
+        return False
+    if not _price_is_changed(candidate):
         return False
     if candidate.new_price is None or candidate.new_price <= 0:
         return False
@@ -277,16 +292,7 @@ def is_exportable(candidate: UpdateCandidate) -> bool:
         return False
     if IDENTITY_CONFLICT_WARNING in candidate.warnings:
         return False
-    if candidate.review_decision == ReviewDecision.EXCLUDE:
-        return False
-    soft_warnings = [
-        w for w in candidate.warnings if w != IDENTITY_CONFLICT_WARNING
-    ]
-    if soft_warnings and candidate.review_decision != ReviewDecision.APPROVE:
-        return False
-    if candidate.review_decision in {ReviewDecision.INCLUDE, ReviewDecision.APPROVE}:
-        return True
-    return False
+    return True
 
 
 def to_final_sale_updates(

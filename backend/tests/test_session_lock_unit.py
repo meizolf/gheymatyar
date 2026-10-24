@@ -46,7 +46,7 @@ def test_session_lock_serializes_exclude_before_export_snapshot(
                 percentage_change=Decimal("10"),
                 match_type=None,
                 status=MatchStatus.MATCHED,
-                review_decision=ReviewDecision.INCLUDE,
+                review_decision=ReviewDecision.APPROVE,
                 warnings=[],
                 suggestions=[],
                 source_currency="rial",

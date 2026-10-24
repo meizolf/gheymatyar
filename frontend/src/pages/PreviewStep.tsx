@@ -251,7 +251,7 @@ export function PreviewStep() {
           متطابق: <strong>{previewQuery.data!.matched_count}</strong>
         </span>
         <span className="chip">
-          قابل خروجی: <strong>{exportableCount}</strong>
+          تأییدشده برای خروجی: <strong>{exportableCount}</strong>
         </span>
         <span className="chip" title="ردیف‌هایی با قیمت متفاوت (حتی اگر حذف‌شده)">
           اختلاف قیمت: <strong>{changedDetected}</strong>
@@ -333,10 +333,13 @@ export function PreviewStep() {
                 const blocked = isHardBlocked(c)
                 const softWarnings = approvableWarnings(c)
                 const excluded = c.review_decision === 'EXCLUDE'
+                const priceChanged = isPriceChanged(c)
+                const approved = c.review_decision === 'APPROVE'
                 const needsApprove =
                   !blocked &&
-                  softWarnings.length > 0 &&
-                  c.review_decision !== 'APPROVE'
+                  !excluded &&
+                  priceChanged &&
+                  !approved
                 const provenance = provenanceText(c)
                 return (
                   <tr
@@ -383,11 +386,17 @@ export function PreviewStep() {
                         {blocked
                           ? 'مسدود'
                           : c.exportable
-                            ? 'معتبر'
-                            : needsApprove
+                            ? 'تأییدشده'
+                            : needsApprove && softWarnings.length > 0
                               ? 'نیاز به تأیید هشدار'
-                              : (REVIEW_LABEL[c.review_decision] ??
-                                c.review_decision)}
+                              : needsApprove
+                                ? 'نیاز به تأیید'
+                                : !priceChanged &&
+                                    c.status === 'MATCHED' &&
+                                    !excluded
+                                  ? 'بدون تغییر'
+                                  : (REVIEW_LABEL[c.review_decision] ??
+                                    c.review_decision)}
                       </Badge>
                     </td>
                     <td>
@@ -435,7 +444,7 @@ export function PreviewStep() {
                             شامل کردن
                           </Button>
                         ) : null}
-                        {!blocked && !excluded && needsApprove ? (
+                        {!blocked && !excluded && needsApprove && softWarnings.length > 0 ? (
                           <Button
                             size="sm"
                             disabled={opsPending}
@@ -447,6 +456,20 @@ export function PreviewStep() {
                             }
                           >
                             تأیید هشدار
+                          </Button>
+                        ) : null}
+                        {!blocked && !excluded && needsApprove && softWarnings.length === 0 ? (
+                          <Button
+                            size="sm"
+                            disabled={opsPending}
+                            onClick={() =>
+                              void reviewMutation.mutateAsync({
+                                candidateId: c.candidate_id,
+                                decision: 'APPROVE',
+                              })
+                            }
+                          >
+                            تأیید برای خروجی
                           </Button>
                         ) : null}
                         {!excluded ? (

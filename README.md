@@ -92,7 +92,7 @@ macOS cannot produce the Windows EXE; use the Actions artifact or a Windows buil
 
 ### Supplier support
 
-Only `نرخ فروش اصلی` is written. That column is confirmed **Rial** (default setting; original supplier currency/amount stay in metadata). Amounts use `Decimal` — never float. Carton/meterage package sizes are never multiplied into the sale price, and VAT is not invented. A per-metre price is never written onto a branch unit such as `شاخه 6 متری`. Genuine extraction, duplicate-name, identity, and ambiguous-column blockers remain.
+Only `نرخ فروش اصلی` is written, and only on rows the user has explicitly approved when the new price is numerically different. The output workbook contains those product rows and the required headers, not the rest of the uploaded catalog. That column is always **Rial**; there is no currency or price-basis setting. The only setting is the warning threshold (`suspicious_percent_threshold`). Amounts use `Decimal` — never float. Carton, length, branch, roll, and package quantities are never multiplied into the sale price, and VAT is not invented. A per-metre price is never written onto a branch unit such as `شاخه 6 متری`. Genuine extraction, duplicate-name, identity, and ambiguous-column blockers remain. Exporting an `.xlsx` here does not show that the Pioneers desktop application will import it.
 
 | Key | List | Price handling |
 |---|---|---|
@@ -101,6 +101,7 @@ Only `نرخ فروش اصلی` is written. That column is confirmed **Rial** (d
 | `dina_polymer` | دینا پلیمر | Printed Rial. Pipe/drip prices stay per meter; fittings per piece. Fitting `#N/A` column is the price; drip table uses labeled `قیمت` (not adjacent `#N/A`). |
 | `newpipe` | نیوپایپ | Printed Rial, 10% VAT included. Package length is not multiplied. Same name with different prices is blocked. |
 | `abrahan_pipe` | آبراهان | Printed cash Rial. `موجود` rows are skipped. VAT is not stated. |
+| `kian` | کیان | Printed Toman → Rial with a single `× 10`. Package quantity is not multiplied. |
 
 Pars Plast, PG 234 (Polymer Golpayegan), and Kaveh Gostar are **not supported**. Their pages are image-only or the embedded font does not expose the printed prices. Offline Persian OCR is not bundled, and Windows offline OCR has not been verified, so those keys stay unregistered and return HTTP 400.
 

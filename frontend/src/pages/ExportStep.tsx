@@ -58,8 +58,14 @@ export function ExportStep() {
           ) {
             throw new Error('count-mismatch')
           }
-          const blob = await api.downloadExcel(sessionId!)
-          return { result, blob }
+          const file = await api.downloadExcel(sessionId!)
+          if (
+            file.exportedRowCount !== result.exported_row_count ||
+            file.contentSha256 !== result.content_sha256
+          ) {
+            throw new Error('count-mismatch')
+          }
+          return { result, blob: file.blob }
         })
       } finally {
         setExportInFlight(false)
@@ -164,8 +170,8 @@ export function ExportStep() {
 
       {exportable < 1 ? (
         <Alert tone="warning">
-          هیچ ردیف قابل خروجی وجود ندارد. به پیش‌نمایش برگردید و موارد را شامل یا
-          تأیید کنید.
+          هیچ ردیف تأییدشده با قیمت تغییرکرده وجود ندارد. به پیش‌نمایش برگردید و
+          موارد را تأیید کنید.
         </Alert>
       ) : (
         <Alert tone="info">

@@ -20,8 +20,12 @@ the product list in SQLite. Prices are whole-number text such as ``4610000``.
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import tempfile
+import xml.etree.ElementTree as ET
+import zipfile
 from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
@@ -30,6 +34,7 @@ from typing import Any, Mapping, Sequence
 
 from openpyxl import load_workbook
 from openpyxl.cell.cell import Cell
+from openpyxl.formula.tokenizer import Token, Tokenizer
 from openpyxl.utils import get_column_letter
 from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
@@ -64,6 +69,8 @@ _SHEET_MATCH_HEADERS: tuple[str, ...] = (
     HEADER_NAME,
     HEADER_SALE_PRICE,
 )
+# A second sheet can list products without the sale-price header.
+_IDENTITY_HEADERS: tuple[str, ...] = (HEADER_CODE, HEADER_NAME)
 
 _parser = PioneersExcelParser()
 
@@ -87,6 +94,7 @@ class ExcelUpdateResult:
     output_path: str
     updated_count: int
     exported_row_count: int
+    content_sha256: str
     changes: tuple[SalePriceChange, ...]
 
 
@@ -139,6 +147,8 @@ def update_final_sale_prices(
             worksheet,
             [row_number for _update, row_number, _old in planned],
         )
+        _filter_extra_catalogs(workbook, worksheet, planned)
+        _reject_cached_product_objects(workbook)
         exported_row_count = _publish_workbook(
             workbook,
             output,
@@ -158,6 +168,7 @@ def update_final_sale_prices(
         output_path=str(output.resolve()),
         updated_count=len(planned),
         exported_row_count=exported_row_count,
+        content_sha256=hashlib.sha256(output.read_bytes()).hexdigest(),
         changes=tuple(
             SalePriceChange(
                 row_number=row_number,
@@ -739,14 +750,20 @@ def _price_as_pioneers_text(amount: Decimal) -> str:
     return text
 
 
+_CELL_REF = re.compile(r"^(\$?)([A-Z]{1,3})(\$?)(\d+)$")
+
+
 def _retain_approved_product_rows(
     workbook: Workbook,
     worksheet: Worksheet,
     keep_rows: Sequence[int],
+    *,
+    header_row: int = HEADER_ROW,
 ) -> None:
     """Drop every product row that was not approved and clear stale artifacts.
 
     Approved rows stay in their original order and move up under the header.
+    Formulas, single-row merges, and row heights move with those rows.
     Hidden rows, blank rows, tables, filters, and named ranges that pointed at
     the full product list are removed so Pioneers cannot import them.
     """
@@ -757,24 +774,298 @@ def _retain_approved_product_rows(
             sheet=worksheet.title,
             reason="approved rows are missing or repeated",
         )
+    ordered = sorted(keep)
+    row_map = {
+        old: header_row + offset for offset, old in enumerate(ordered, start=1)
+    }
+    heights = {
+        old: worksheet.row_dimensions[old].height for old in ordered
+    }
+    relocated_merges = _take_relocated_merges(worksheet, row_map, header_row)
     _clear_sheet_artifacts(worksheet)
-    _unmerge_ranges_outside_kept_rows(worksheet, keep)
-    max_row = worksheet.max_row or HEADER_ROW
+    max_row = worksheet.max_row or header_row
     row = max_row
-    while row > HEADER_ROW:
+    while row > header_row:
         if row in keep:
             row -= 1
             continue
         end = row
-        while row > HEADER_ROW and row not in keep:
+        while row > header_row and row not in keep:
             row -= 1
         worksheet.delete_rows(row + 1, end - row)
-    expected_max = HEADER_ROW + len(keep)
-    actual_max = worksheet.max_row or HEADER_ROW
+    expected_max = header_row + len(keep)
+    actual_max = worksheet.max_row or header_row
     if actual_max > expected_max:
         worksheet.delete_rows(expected_max + 1, actual_max - expected_max)
-    _unhide_used_rows(worksheet)
+    _unhide_used_rows(worksheet, header_row)
+    for old, new in row_map.items():
+        worksheet.row_dimensions[new].height = heights[old]
+    for min_row, max_row_merged, min_col, max_col in relocated_merges:
+        worksheet.merge_cells(
+            start_row=min_row,
+            start_column=min_col,
+            end_row=max_row_merged,
+            end_column=max_col,
+        )
+    _remap_sheet_formulas(worksheet, row_map, header_row)
     _drop_sheet_defined_names(workbook, worksheet.title)
+
+
+def _take_relocated_merges(
+    worksheet: Worksheet,
+    row_map: dict[int, int],
+    header_row: int,
+) -> list[tuple[int, int, int, int]]:
+    """Unmerge data ranges and remember those that stay on retained rows."""
+    relocated: list[tuple[int, int, int, int]] = []
+    for merged in list(worksheet.merged_cells.ranges):
+        if merged.max_row <= header_row:
+            continue
+        rows = list(range(merged.min_row, merged.max_row + 1))
+        if any(row not in row_map for row in rows):
+            worksheet.unmerge_cells(str(merged))
+            continue
+        new_rows = [row_map[row] for row in rows]
+        if max(new_rows) - min(new_rows) + 1 != len(set(new_rows)):
+            worksheet.unmerge_cells(str(merged))
+            continue
+        relocated.append(
+            (min(new_rows), max(new_rows), merged.min_col, merged.max_col)
+        )
+        worksheet.unmerge_cells(str(merged))
+    return relocated
+
+
+def _remap_sheet_formulas(
+    worksheet: Worksheet,
+    row_map: dict[int, int],
+    header_row: int,
+) -> None:
+    kept_rows = set(row_map.values())
+    for (row_idx, col_idx), cell in list(worksheet._cells.items()):
+        if row_idx not in kept_rows:
+            continue
+        if cell.data_type != "f" or not isinstance(cell.value, str):
+            continue
+        cell.value = _remap_formula(cell.value, row_map, header_row, worksheet.title)
+
+
+def _remap_formula(
+    formula: str,
+    row_map: dict[int, int],
+    header_row: int,
+    sheet_name: str,
+) -> str:
+    tokenizer = Tokenizer(formula if formula.startswith("=") else f"={formula}")
+    parts: list[str] = []
+    for token in tokenizer.items:
+        if token.type == Token.OPERAND and token.subtype == Token.RANGE:
+            parts.append(
+                _remap_reference(token.value, row_map, header_row, sheet_name)
+            )
+        else:
+            parts.append(token.value)
+    body = "".join(parts)
+    return body if body.startswith("=") else f"={body}"
+
+
+def _remap_reference(
+    ref: str,
+    row_map: dict[int, int],
+    header_row: int,
+    sheet_name: str,
+) -> str:
+    if "!" in ref or "[" in ref:
+        raise PioneersExcelWriteError(
+            "formula depends on a sheet or workbook reference that cannot be kept",
+            sheet=sheet_name,
+            reason=ref,
+        )
+    if ":" in ref:
+        left, right = ref.split(":", 1)
+        return (
+            f"{_remap_cell(left, row_map, header_row, sheet_name, span=ref)}"
+            f":{_remap_cell(right, row_map, header_row, sheet_name, span=ref)}"
+        )
+    return _remap_cell(ref, row_map, header_row, sheet_name)
+
+
+def _remap_cell(
+    ref: str,
+    row_map: dict[int, int],
+    header_row: int,
+    sheet_name: str,
+    *,
+    span: str | None = None,
+) -> str:
+    match = _CELL_REF.match(ref)
+    if match is None:
+        raise PioneersExcelWriteError(
+            "formula depends on a named range or reference that cannot be kept",
+            sheet=sheet_name,
+            reason=ref,
+        )
+    col_abs, column, row_abs, row_text = match.groups()
+    row = int(row_text)
+    if span is not None:
+        _reject_range_gap(span, row_map, header_row, sheet_name)
+    new_row = _map_formula_row(row, row_map, header_row, sheet_name, ref)
+    return f"{col_abs}{column}{row_abs}{new_row}"
+
+
+def _reject_range_gap(
+    span: str,
+    row_map: dict[int, int],
+    header_row: int,
+    sheet_name: str,
+) -> None:
+    left, right = span.split(":", 1)
+    left_match = _CELL_REF.match(left)
+    right_match = _CELL_REF.match(right)
+    if left_match is None or right_match is None:
+        raise PioneersExcelWriteError(
+            "formula depends on a named range or reference that cannot be kept",
+            sheet=sheet_name,
+            reason=span,
+        )
+    start = int(left_match.group(4))
+    end = int(right_match.group(4))
+    for row in range(min(start, end), max(start, end) + 1):
+        if row > header_row and row not in row_map:
+            raise PioneersExcelWriteError(
+                "formula depends on a product row that is not in the export",
+                sheet=sheet_name,
+                reason=f"{span} includes row {row}",
+            )
+
+
+def _map_formula_row(
+    row: int,
+    row_map: dict[int, int],
+    header_row: int,
+    sheet_name: str,
+    ref: str,
+) -> int:
+    if row <= header_row:
+        return row
+    mapped = row_map.get(row)
+    if mapped is None:
+        raise PioneersExcelWriteError(
+            "formula depends on a product row that is not in the export",
+            sheet=sheet_name,
+            reason=f"{ref} references row {row}",
+        )
+    return mapped
+
+
+def _filter_extra_catalogs(
+    workbook: Workbook,
+    primary: Worksheet,
+    planned: Sequence[tuple[FinalSalePriceUpdate, int, Decimal | None]],
+) -> None:
+    """Remove every product row that is not on the primary product sheet.
+
+    Another catalog, including a veryHidden sheet whose headers omit
+    ``نرخ فروش اصلی`` or sit below row 15, would otherwise keep unapproved
+    products. Those rows are deleted. The header and any title above it stay.
+    A sheet with more than one product table is rejected.
+    """
+    if not planned:
+        raise PioneersExcelWriteError("no approved updates available for export")
+    for worksheet in workbook.worksheets:
+        if worksheet.title == primary.title:
+            continue
+        header_row = _find_catalog_header_row(worksheet)
+        if header_row is None:
+            continue
+        columns = _header_columns_on_row(worksheet, header_row)
+        _require_unique_header(worksheet, columns, HEADER_CODE)
+        _require_unique_header(worksheet, columns, HEADER_NAME)
+        max_row = worksheet.max_row or header_row
+        if max_row > header_row:
+            worksheet.delete_rows(header_row + 1, max_row - header_row)
+        _clear_sheet_artifacts(worksheet)
+        _unhide_used_rows(worksheet, header_row)
+        _drop_sheet_defined_names(workbook, worksheet.title)
+
+
+def _catalog_header_rows(worksheet: Worksheet) -> list[int]:
+    """Every row that identifies products by code and name, once each.
+
+    ``نرخ فروش اصلی`` is not required. A hidden sheet headed by ``کد کالا``,
+    ``نـــام کــالا``, and another price label is still a product catalog.
+    """
+    found: list[int] = []
+    for cells in worksheet.iter_rows():
+        counts: dict[str, int] = defaultdict(int)
+        row_index: int | None = None
+        for cell in cells:
+            if row_index is None and isinstance(cell.row, int):
+                row_index = cell.row
+            value = cell.value
+            if isinstance(value, str) and value.strip() in _IDENTITY_HEADERS:
+                counts[value.strip()] += 1
+        if row_index is None:
+            continue
+        if all(counts.get(header) == 1 for header in _IDENTITY_HEADERS):
+            found.append(row_index)
+    return found
+
+
+def _find_catalog_header_row(worksheet: Worksheet) -> int | None:
+    """Return the only product-header row, at any position on the sheet."""
+    rows = _catalog_header_rows(worksheet)
+    if len(rows) > 1:
+        raise PioneersExcelWriteError(
+            "unsupported workbook contains more than one product table",
+            sheet=worksheet.title,
+        )
+    if not rows:
+        return None
+    return rows[0]
+
+
+def _header_columns_on_row(worksheet: Worksheet, header_row: int) -> dict[str, list[int]]:
+    header_columns: dict[str, list[int]] = defaultdict(list)
+    for cell in worksheet[header_row]:
+        value = cell.value
+        if not isinstance(value, str) or not isinstance(cell.column, int):
+            continue
+        header = value.strip()
+        if header:
+            header_columns[header].append(cell.column)
+    return header_columns
+
+
+def _require_unique_header(
+    worksheet: Worksheet,
+    columns: Mapping[str, Sequence[int]],
+    header: str,
+) -> int:
+    found = list(columns.get(header, []))
+    if len(found) != 1:
+        raise PioneersExcelWriteError(
+            "unsupported workbook contains product headers that cannot be filtered",
+            sheet=worksheet.title,
+            column=header,
+            reason=f"{header} appears {len(found)} times",
+        )
+    return found[0]
+
+
+def _reject_cached_product_objects(workbook: Workbook) -> None:
+    """Charts and pivot caches can keep the full catalog after rows are deleted."""
+    for worksheet in workbook.worksheets:
+        if worksheet._charts:
+            raise PioneersExcelWriteError(
+                "unsupported workbook contains a chart that can retain unapproved products",
+                sheet=worksheet.title,
+            )
+        if worksheet._pivots:
+            raise PioneersExcelWriteError(
+                "unsupported workbook contains a pivot table that can retain unapproved products",
+                sheet=worksheet.title,
+            )
 
 
 def _clear_sheet_artifacts(worksheet: Worksheet) -> None:
@@ -791,18 +1082,8 @@ def _clear_sheet_artifacts(worksheet: Worksheet) -> None:
     worksheet.print_title_rows = None
 
 
-def _unmerge_ranges_outside_kept_rows(worksheet: Worksheet, keep: set[int]) -> None:
-    for merged in list(worksheet.merged_cells.ranges):
-        rows = set(range(merged.min_row, merged.max_row + 1))
-        if rows <= {HEADER_ROW}:
-            continue
-        if len(rows) == 1 and rows <= keep:
-            continue
-        worksheet.unmerge_cells(str(merged))
-
-
-def _unhide_used_rows(worksheet: Worksheet) -> None:
-    max_row = worksheet.max_row or HEADER_ROW
+def _unhide_used_rows(worksheet: Worksheet, header_row: int = HEADER_ROW) -> None:
+    max_row = worksheet.max_row or header_row
     for index in range(1, max_row + 1):
         if index in worksheet.row_dimensions:
             worksheet.row_dimensions[index].hidden = False
@@ -828,11 +1109,11 @@ def _cell_is_blank(value: object) -> bool:
     return value is None or (isinstance(value, str) and not value.strip())
 
 
-def _product_row_count(worksheet: Worksheet) -> int:
-    max_row = worksheet.max_row or HEADER_ROW
+def _product_row_count(worksheet: Worksheet, header_row: int = HEADER_ROW) -> int:
+    max_row = worksheet.max_row or header_row
     max_col = worksheet.max_column or 1
     count = 0
-    for row_idx in range(HEADER_ROW + 1, max_row + 1):
+    for row_idx in range(header_row + 1, max_row + 1):
         if row_idx in worksheet.row_dimensions and worksheet.row_dimensions[row_idx].hidden:
             raise PioneersExcelWriteError(
                 "exported workbook still has a hidden product row",
@@ -946,13 +1227,6 @@ def _verify_published_workbook(
         _assert_no_sheet_defined_names(saved, sheet_name, path)
         _assert_headers_match(source_sheet, worksheet, path)
         exported_rows = _product_row_count(worksheet)
-        if exported_rows != len(planned):
-            raise PioneersExcelWriteError(
-                "exported product row count does not match the approved selection",
-                filename=path,
-                sheet=sheet_name,
-                reason=f"expected {len(planned)} product rows, found {exported_rows}",
-            )
         located = _locate_exported_rows(
             worksheet,
             planned,
@@ -960,6 +1234,7 @@ def _verify_published_workbook(
             code_column=code_column,
             path=path,
         )
+        row_map = {source_row: output_row for _update, source_row, output_row in located}
         for update, source_row, output_row in located:
             _assert_retained_row(
                 source_sheet,
@@ -969,15 +1244,247 @@ def _verify_published_workbook(
                 output_row=output_row,
                 price_column=price_column,
                 path=path,
+                row_map=row_map,
             )
+        approved_codes = {
+            (update.pioneers_code or "").strip()
+            for update, _row, _old in planned
+            if (update.pioneers_code or "").strip()
+        }
+        approved_names = {
+            _normalize_identity_text(update.pioneers_name)
+            for update, _row, _old in planned
+            if not (update.pioneers_code or "").strip()
+        }
+        for _update, _source_row, output_row in located:
+            retained_code = _sheet_text(worksheet.cell(output_row, code_column).value)
+            if retained_code:
+                approved_codes.add(retained_code)
+            else:
+                approved_names.add(
+                    _normalize_identity_text(
+                        _sheet_text(worksheet.cell(output_row, name_column).value)
+                    )
+                )
+        extra_rows = 0
         for name in original.sheetnames:
             if name == sheet_name:
                 continue
-            _assert_sheet_values_match(original[name], saved[name], path)
+            header_row = _find_catalog_header_row(saved[name])
+            if header_row is None:
+                _assert_sheet_values_match(original[name], saved[name], path)
+                continue
+            extra_rows += _product_row_count(saved[name], header_row)
+        total_rows = exported_rows + extra_rows
+        if exported_rows != len(planned) or extra_rows != 0:
+            raise PioneersExcelWriteError(
+                "exported product row count does not match the approved selection",
+                filename=path,
+                sheet=sheet_name,
+                reason=f"expected {len(planned)} product rows, found {total_rows}",
+            )
+        _assert_package_product_records(
+            path,
+            expected_count=len(planned),
+            approved_codes=approved_codes,
+            approved_names=approved_names,
+        )
         return exported_rows
     finally:
         saved.close()
         original.close()
+
+
+_CELL_COORD = re.compile(r"^([A-Z]+)(\d+)$")
+
+
+def _assert_package_product_records(
+    path: Path,
+    *,
+    expected_count: int,
+    approved_codes: set[str],
+    approved_names: set[str],
+) -> None:
+    """Read the saved package and require one product record per approval.
+
+    Identity cells are the code column, or the name column when the row has no
+    code. A sale price that happens to equal an excluded product code is not
+    an identity. Chart, pivot, and table parts can still hide a catalog, so
+    those parts are rejected.
+    """
+    with zipfile.ZipFile(path) as archive:
+        for name in archive.namelist():
+            if name.startswith(("xl/pivot", "xl/charts/")):
+                raise PioneersExcelWriteError(
+                    "exported workbook still contains a chart or pivot cache",
+                    filename=path,
+                    reason=name,
+                )
+            if name.startswith("xl/tables/"):
+                raise PioneersExcelWriteError(
+                    "Saved workbook still contains a product table",
+                    filename=path,
+                    reason=name,
+                )
+        strings = _package_shared_strings(archive)
+        records: list[tuple[str, str]] = []
+        for name in archive.namelist():
+            if "/worksheets/" not in name or not name.endswith(".xml"):
+                continue
+            records.extend(
+                _xml_product_identities(archive.read(name), strings, path, name)
+            )
+    if len(records) != expected_count:
+        raise PioneersExcelWriteError(
+            "exported product row count does not match the approved selection",
+            filename=path,
+            reason=f"expected {expected_count} product rows, found {len(records)}",
+        )
+    seen: set[tuple[str, str]] = set()
+    for kind, value in records:
+        identity = (kind, value)
+        if identity in seen:
+            raise PioneersExcelWriteError(
+                "selected Pioneers product cannot be identified uniquely",
+                filename=path,
+                pioneers_code=value if kind == "code" else None,
+                reason=value,
+            )
+        seen.add(identity)
+        if kind == "code" and value not in approved_codes:
+            raise PioneersExcelWriteError(
+                "exported workbook still contains an unapproved product",
+                filename=path,
+                pioneers_code=value,
+            )
+        if kind == "name" and _normalize_identity_text(value) not in approved_names:
+            raise PioneersExcelWriteError(
+                "exported workbook still contains an unapproved product",
+                filename=path,
+                reason=value,
+            )
+
+
+def _package_shared_strings(archive: zipfile.ZipFile) -> list[str]:
+    if "xl/sharedStrings.xml" not in archive.namelist():
+        return []
+    root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
+    strings: list[str] = []
+    for element in root:
+        if _xml_local(element.tag) != "si":
+            continue
+        strings.append("".join(text.text or "" for text in element.iter() if _xml_local(text.tag) == "t"))
+    return strings
+
+
+def _xml_product_identities(
+    payload: bytes,
+    shared_strings: list[str],
+    path: Path,
+    part_name: str,
+) -> list[tuple[str, str]]:
+    root = ET.fromstring(payload)
+    rows: dict[int, dict[str, str]] = {}
+    for element in root.iter():
+        if _xml_local(element.tag) != "c":
+            continue
+        column, row_number = _xml_cell_position(element.get("r"))
+        if not column or row_number is None:
+            continue
+        rows.setdefault(row_number, {})[column] = _xml_cell_text(element, shared_strings)
+    header_rows = [
+        row_number
+        for row_number, values in rows.items()
+        if _xml_row_has_product_headers(values)
+    ]
+    if len(header_rows) > 1:
+        raise PioneersExcelWriteError(
+            "unsupported workbook contains more than one product table",
+            filename=path,
+            reason=part_name,
+        )
+    if not header_rows:
+        return []
+    header_row = header_rows[0]
+    header = rows[header_row]
+    code_column = _xml_header_column(header, HEADER_CODE, path, part_name)
+    name_column = _xml_header_column(header, HEADER_NAME, path, part_name)
+    identities: list[tuple[str, str]] = []
+    for row_number in sorted(row for row in rows if row > header_row):
+        values = rows[row_number]
+        if not any(value.strip() for value in values.values()):
+            continue
+        code = values.get(code_column, "").strip()
+        name = values.get(name_column, "").strip()
+        if code:
+            identities.append(("code", code))
+        elif name:
+            identities.append(("name", name))
+        else:
+            raise PioneersExcelWriteError(
+                "exported workbook still contains an unapproved product",
+                filename=path,
+                reason=f"{part_name} row {row_number}",
+            )
+    return identities
+
+
+def _xml_header_column(
+    header: Mapping[str, str],
+    wanted: str,
+    path: Path,
+    part_name: str,
+) -> str:
+    """Find a header after trimming. The workbook cell text is left unchanged."""
+    matches = [column for column, value in header.items() if value.strip() == wanted]
+    if len(matches) != 1:
+        raise PioneersExcelWriteError(
+            "unsupported workbook contains product headers that cannot be filtered",
+            filename=path,
+            column=wanted,
+            reason=f"{wanted} appears {len(matches)} times in {part_name}",
+        )
+    return matches[0]
+
+
+def _xml_row_has_product_headers(values: Mapping[str, str]) -> bool:
+    counts: dict[str, int] = defaultdict(int)
+    for value in values.values():
+        text = value.strip()
+        if text in _IDENTITY_HEADERS:
+            counts[text] += 1
+    return all(counts.get(header) == 1 for header in _IDENTITY_HEADERS)
+
+
+def _xml_cell_position(ref: str | None) -> tuple[str, int | None]:
+    if not ref:
+        return "", None
+    match = _CELL_COORD.match(ref)
+    if match is None:
+        return "", None
+    return match.group(1), int(match.group(2))
+
+
+def _xml_cell_text(element: ET.Element, shared_strings: list[str]) -> str:
+    kind = element.get("t")
+    if kind == "inlineStr":
+        return "".join(
+            text.text or "" for text in element.iter() if _xml_local(text.tag) == "t"
+        )
+    value = next(
+        (child.text or "" for child in element if _xml_local(child.tag) == "v"),
+        "",
+    )
+    if kind == "s":
+        try:
+            return shared_strings[int(value)]
+        except (ValueError, IndexError):
+            return ""
+    return value
+
+
+def _xml_local(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
 
 
 def _assert_no_sheet_defined_names(
@@ -1110,6 +1617,7 @@ def _assert_retained_row(
     output_row: int,
     price_column: int,
     path: Path,
+    row_map: Mapping[int, int],
 ) -> None:
     max_col = source.max_column or 1
     expected_price = _price_as_pioneers_text(update.final_sale_price)
@@ -1127,14 +1635,22 @@ def _assert_retained_row(
                     reason=f"expected {expected_price!r}, found {output_value!r}",
                 )
             continue
-        if output_value != source_value:
+        expected = source_value
+        if isinstance(source_value, str) and source_value.startswith("="):
+            expected = _remap_formula(
+                source_value,
+                dict(row_map),
+                HEADER_ROW,
+                output.title,
+            )
+        if output_value != expected:
             raise PioneersExcelWriteError(
                 "Saved workbook changed a field other than نرخ فروش اصلی",
                 filename=path,
                 row=output_row,
                 column=get_column_letter(column),
                 pioneers_code=update.pioneers_code,
-                reason=f"expected {source_value!r}, found {output_value!r}",
+                reason=f"expected {expected!r}, found {output_value!r}",
             )
 
 

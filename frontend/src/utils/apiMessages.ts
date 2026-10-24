@@ -47,7 +47,7 @@ const PATTERNS: Array<{ re: RegExp; fa: string | ((m: RegExpMatchArray) => strin
   },
   {
     re: /no approved updates available for export/i,
-    fa: 'هیچ به‌روزرسانی تأییدشده‌ای برای خروجی وجود ندارد. ابتدا موارد را تأیید یا شامل کنید.',
+    fa: 'هیچ به‌روزرسانی تأییدشده‌ای برای خروجی وجود ندارد. ابتدا قیمت‌های تغییرکرده را تأیید کنید.',
   },
   {
     re: /conflicting final sale prices for the same Pioneers product/i,
@@ -63,7 +63,7 @@ const PATTERNS: Array<{ re: RegExp; fa: string | ((m: RegExpMatchArray) => strin
   },
   {
     re: /no exportable candidates|nothing to export/i,
-    fa: 'هیچ ردیف قابل خروجی وجود ندارد. ابتدا موارد را تأیید یا شامل کنید.',
+    fa: 'هیچ ردیف قابل خروجی وجود ندارد. ابتدا موارد را تأیید کنید.',
   },
   {
     re: /export not available/i,
