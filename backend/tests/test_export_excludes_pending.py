@@ -24,7 +24,7 @@ def test_excluded_row_not_updated_in_download(
     assert export.status_code == 200
     assert export.json()["updated_count"] == 1
 
-    download = client.get(f"/api/sessions/{session_id}/download")
+    download = client.get(f"/api/sessions/{session_id}/download?format=xlsx")
     assert download.status_code == 200
     out = tmp_path / "out.xlsx"
     out.write_bytes(download.content)

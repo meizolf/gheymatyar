@@ -55,7 +55,7 @@ def test_order_exclude_then_export_omits_excluded_row(
     assert export.status_code == 200
     assert export.json()["updated_count"] == 1
 
-    download = client.get(f"/api/sessions/{session_id}/download")
+    download = client.get(f"/api/sessions/{session_id}/download?format=xlsx")
     assert download.status_code == 200
     out = tmp_path / "exclude_then_export.xlsx"
     out.write_bytes(download.content)
@@ -76,7 +76,7 @@ def test_order_export_then_exclude_invalidates_stale_download(
     assert export.status_code == 200
     assert export.json()["updated_count"] == 2
 
-    download = client.get(f"/api/sessions/{session_id}/download")
+    download = client.get(f"/api/sessions/{session_id}/download?format=xlsx")
     assert download.status_code == 200
     first = tmp_path / "export_first.xlsx"
     first.write_bytes(download.content)
@@ -98,7 +98,7 @@ def test_order_export_then_exclude_invalidates_stale_download(
     assert re_export.status_code == 200
     assert re_export.json()["updated_count"] == 1
 
-    download2 = client.get(f"/api/sessions/{session_id}/download")
+    download2 = client.get(f"/api/sessions/{session_id}/download?format=xlsx")
     assert download2.status_code == 200
     second = tmp_path / "export_after_exclude.xlsx"
     second.write_bytes(download2.content)

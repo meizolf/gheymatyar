@@ -142,8 +142,34 @@ def test_end_to_end_azin_workflow(
     assert export_resp.status_code == 200, export_resp.text
     assert export_resp.json()["updated_count"] == 1
     assert export_resp.json()["exported_row_count"] == 1
-    download = client.get(f"/api/sessions/{session_id}/download")
+    assert export_resp.json()["format"] == "xls"
+    assert export_resp.json()["output_filename"] == "pioneers_azin_subset_updated.xls"
+
+    # Default download: Pioneers' own HTML-based .xls, not a renamed .xlsx.
+    legacy = client.get(f"/api/sessions/{session_id}/download")
+    assert legacy.status_code == 200, legacy.text
+    assert legacy.headers["content-type"] == "application/vnd.ms-excel"
+    assert "pioneers_azin_subset_updated.xls" in legacy.headers["content-disposition"]
+    assert legacy.headers["x-exported-row-count"] == "1"
+    assert legacy.headers["x-export-content-sha256"] == export_resp.json()["content_sha256"]
+    assert legacy.headers["x-export-content-sha256"] == hashlib.sha256(
+        legacy.content
+    ).hexdigest()
+    assert legacy.content.startswith(b"\xef\xbb\xbf<Html>\n<Body>\n<Table>\n")
+    legacy_path = tmp_path / "export.xls"
+    legacy_path.write_bytes(legacy.content)
+    subprocess.run([
+        sys.executable, str(REPO_ROOT / "scripts/windows/check_legacy_xls.py"),
+        "--exported", str(legacy_path), "--source", str(pioneers_azin_excel),
+        "--code", keep["pioneers_code"], "--price", review.json()["new_price"],
+        "--source-sha256", source_sha,
+    ], check=True)
+
+    download = client.get(f"/api/sessions/{session_id}/download?format=xlsx")
     assert download.status_code == 200, download.text
+    assert download.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
     exported = tmp_path / "export.xlsx"
     exported.write_bytes(download.content)
     # Exercise the same CLIs used by the packaged smoke, including HTML-XLS

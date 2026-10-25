@@ -121,7 +121,7 @@ def test_ignore_matched_and_unmatched_persists_and_skips_export(
     export = client.post(f"/api/sessions/{session_id}/export")
     assert export.status_code == 200, export.text
     assert export.json()["updated_count"] == 1
-    download = client.get(f"/api/sessions/{session_id}/download")
+    download = client.get(f"/api/sessions/{session_id}/download?format=xlsx")
     assert download.status_code == 200
     out = tmp_path / "out.xlsx"
     out.write_bytes(download.content)

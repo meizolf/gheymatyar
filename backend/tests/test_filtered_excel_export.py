@@ -628,7 +628,7 @@ def test_api_drops_partial_hidden_catalog(client, tmp_path: Path) -> None:
     exported = client.post(f"/api/sessions/{session_id}/export")
     assert exported.status_code == 200, exported.text
     assert exported.json()["exported_row_count"] == 1
-    download = client.get(f"/api/sessions/{session_id}/download")
+    download = client.get(f"/api/sessions/{session_id}/download?format=xlsx")
     assert download.status_code == 200, download.text
     assert download.headers["x-exported-row-count"] == "1"
     saved = load_workbook(BytesIO(download.content))
@@ -666,7 +666,7 @@ def test_api_exports_workbook_with_spaced_headers(client, tmp_path: Path) -> Non
     body = exported.json()
     assert body["exported_row_count"] == 1
     assert body["updated_count"] == 1
-    download = client.get(f"/api/sessions/{session_id}/download")
+    download = client.get(f"/api/sessions/{session_id}/download?format=xlsx")
     assert download.status_code == 200, download.text
     assert download.headers["x-exported-row-count"] == "1"
     saved = load_workbook(BytesIO(download.content))

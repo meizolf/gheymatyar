@@ -96,7 +96,7 @@ def test_abrahan_export_changes_only_final_sale_price(
     export_resp = client.post(f"/api/sessions/{session_id}/export")
     assert export_resp.status_code == 200, export_resp.text
     assert export_resp.json()["updated_count"] == 1
-    download = client.get(f"/api/sessions/{session_id}/download")
+    download = client.get(f"/api/sessions/{session_id}/download?format=xlsx")
     assert download.status_code == 200
     output = tmp_path / "out.xlsx"
     output.write_bytes(download.content)
@@ -174,7 +174,7 @@ def test_confirmed_metre_export_changes_only_final_sale_price(
     export_resp = client.post(f"/api/sessions/{session_id}/export")
     assert export_resp.status_code == 200, export_resp.text
     assert export_resp.json()["updated_count"] == 1
-    download = client.get(f"/api/sessions/{session_id}/download")
+    download = client.get(f"/api/sessions/{session_id}/download?format=xlsx")
     assert download.status_code == 200
     output = tmp_path / "out.xlsx"
     output.write_bytes(download.content)

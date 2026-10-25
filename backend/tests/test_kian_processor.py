@@ -398,7 +398,7 @@ def test_kian_export_changes_only_sale_column_in_rial(
     export_resp = client.post(f"/api/sessions/{session_id}/export")
     assert export_resp.status_code == 200, export_resp.text
     assert export_resp.json()["updated_count"] == 1
-    download = client.get(f"/api/sessions/{session_id}/download")
+    download = client.get(f"/api/sessions/{session_id}/download?format=xlsx")
     assert download.status_code == 200
     output = tmp_path / "out.xlsx"
     output.write_bytes(download.content)
@@ -638,7 +638,7 @@ def test_kian_split_decimal_becomes_rial(
     assert exported.status_code == 200, exported.text
     assert exported.json()["updated_count"] == 1
     output = tmp_path / "out.xlsx"
-    output.write_bytes(client.get(f"/api/sessions/{session_id}/download").content)
+    output.write_bytes(client.get(f"/api/sessions/{session_id}/download?format=xlsx").content)
     after = _snapshot(output)
     sale_col = next(
         column for (row, column), value in before.items() if row == 1 and value == HEADER_SALE_PRICE

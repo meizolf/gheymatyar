@@ -99,7 +99,7 @@ def _assert_azin_printed_rial_export(client: TestClient, work_dir: Path) -> None
     _assert_status(exported, 200)
     assert exported.json()["updated_count"] == 1
     assert exported.json()["exported_row_count"] == 1
-    download = client.get(f"/api/sessions/{session_id}/download")
+    download = client.get(f"/api/sessions/{session_id}/download?format=xlsx")
     _assert_status(download, 200)
     output = work_dir / "azin_export.xlsx"
     output.write_bytes(download.content)
@@ -206,7 +206,7 @@ def _assert_dina_metre_export(client: TestClient, work_dir: Path) -> None:
     assert exported.status_code == 200, exported.text
     assert exported.json()["updated_count"] >= 1
     assert exported.json()["exported_row_count"] == exported.json()["updated_count"]
-    download = client.get(f"/api/sessions/{session_id}/download")
+    download = client.get(f"/api/sessions/{session_id}/download?format=xlsx")
     assert download.status_code == 200
     assert len(download.content) > 1000
     output = work_dir / "dina_export.xlsx"

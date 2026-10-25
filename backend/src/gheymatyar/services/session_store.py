@@ -42,6 +42,8 @@ class ProcessingSession:
     ambiguous_count: int = 0
     ignored_count: int = 0
     output_path: Path | None = None
+    #: Pioneers HTML ``.xls`` rendered from ``output_path``; written with it.
+    legacy_output_path: Path | None = None
     work_dir: Path | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 

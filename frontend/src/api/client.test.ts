@@ -76,7 +76,8 @@ describe('api client', () => {
       status: 200,
       json: async () => ({
         session_id: 's1',
-        output_filename: 'out.xlsx',
+        format: 'xls',
+        output_filename: 'out.xls',
         updated_count: 1,
         exported_row_count: 1,
         download_path: '/api/sessions/s1/download',

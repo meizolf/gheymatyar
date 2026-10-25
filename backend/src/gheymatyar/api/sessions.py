@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -28,7 +27,12 @@ from gheymatyar.api.schemas import (
     UploadPdfResponse,
 )
 from gheymatyar.domain.enums import MatchStatus, ReviewDecision
-from gheymatyar.services.processing import ProcessingService, candidate_to_dict
+from gheymatyar.services.processing import (
+    DEFAULT_EXPORT_FORMAT,
+    EXPORT_MEDIA_TYPES,
+    ProcessingService,
+    candidate_to_dict,
+)
 from gheymatyar.suppliers.errors import SupplierPdfError, UnsupportedSupplierError
 
 router = APIRouter(tags=["sessions"])
@@ -413,11 +417,19 @@ def set_review(
 )
 def export_excel(
     session_id: str,
+    export_format: str = Query(
+        DEFAULT_EXPORT_FORMAT,
+        alias="format",
+        pattern="^(xls|xlsx)$",
+        description="xls (Pioneers HTML-based .xls, default) or xlsx",
+    ),
     service: ProcessingService = Depends(get_processing_service),
     db: Session = Depends(get_db_session),
 ) -> ExportResponse:
     try:
-        result = service.export_excel(session_id, db)
+        result, exported = service.export_for_download(
+            session_id, db, fmt=export_format
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
     except ValueError as exc:
@@ -431,25 +443,42 @@ def export_excel(
                 "exported product row count does not match the approved selection"
             ),
         )
+    if exported.exported_row_count != result.exported_row_count:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "exported product row count does not match the approved selection"
+            ),
+        )
+    download_path = f"/api/sessions/{session_id}/download"
+    if export_format != DEFAULT_EXPORT_FORMAT:
+        download_path += f"?format={export_format}"
     return ExportResponse(
         session_id=session_id,
-        output_filename=Path(result.output_path).name,
+        format=exported.format,
+        output_filename=exported.filename,
         updated_count=result.updated_count,
-        exported_row_count=result.exported_row_count,
-        content_sha256=result.content_sha256,
-        download_path=f"/api/sessions/{session_id}/download",
+        exported_row_count=exported.exported_row_count,
+        content_sha256=exported.content_sha256,
+        download_path=download_path,
     )
 
 
 @router.get("/sessions/{session_id}/download")
 def download_excel(
     session_id: str,
+    export_format: str = Query(
+        DEFAULT_EXPORT_FORMAT,
+        alias="format",
+        pattern="^(xls|xlsx)$",
+        description="xls (Pioneers HTML-based .xls, default) or xlsx",
+    ),
     service: ProcessingService = Depends(get_processing_service),
     db: Session = Depends(get_db_session),
 ) -> Response:
     try:
         content, download_name, row_count, digest = service.read_fresh_workbook(
-            session_id, db
+            session_id, db, fmt=export_format
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
@@ -458,7 +487,8 @@ def download_excel(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     ascii_name = (
-        download_name.encode("ascii", "ignore").decode() or "pioneers_updated.xlsx"
+        download_name.encode("ascii", "ignore").decode()
+        or f"pioneers_updated.{export_format}"
     )
     disposition = (
         f'attachment; filename="{ascii_name}"; '
@@ -466,7 +496,7 @@ def download_excel(
     )
     return Response(
         content=content,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        media_type=EXPORT_MEDIA_TYPES[export_format],
         headers={
             "Content-Disposition": disposition,
             "X-Exported-Row-Count": str(row_count),

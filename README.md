@@ -92,7 +92,7 @@ macOS cannot produce the Windows EXE; use the Actions artifact or a Windows buil
 
 ### Supplier support
 
-Only `نرخ فروش اصلی` is written, and only on rows the user has explicitly approved when the new price is numerically different. The output workbook contains those product rows and the required headers, not the rest of the uploaded catalog. That column is always **Rial**; there is no currency or price-basis setting. The only setting is the warning threshold (`suspicious_percent_threshold`). Amounts use `Decimal` — never float. Carton, length, branch, roll, and package quantities are never multiplied into the sale price, and VAT is not invented. A per-metre price is never written onto a branch unit such as `شاخه 6 متری`. Genuine extraction, duplicate-name, identity, and ambiguous-column blockers remain. Exporting an `.xlsx` here does not show that the Pioneers desktop application will import it.
+Only `نرخ فروش اصلی` is written, and only on rows the user has explicitly approved when the new price is numerically different. The output workbook contains those product rows and the required headers, not the rest of the uploaded catalog. That column is always **Rial**; there is no currency or price-basis setting. The only setting is the warning threshold (`suspicious_percent_threshold`). Amounts use `Decimal` — never float. Carton, length, branch, roll, and package quantities are never multiplied into the sale price, and VAT is not invented. A per-metre price is never written onto a branch unit such as `شاخه 6 متری`. Genuine extraction, duplicate-name, identity, and ambiguous-column blockers remain. The default download is Pioneers' own `.xls` format: a UTF-8 HTML table with the same markup, header row, and column order as a Pioneers `گزارش لیست کالا.xls` export, not a renamed `.xlsx`. Each exported row keeps every original field; only `نرخ فروش اصلی` changes. The verified `.xlsx` it is rendered from stays available with `?format=xlsx`. Import into the Pioneers desktop application still has to be checked by hand.
 
 | Key | List | Price handling |
 |---|---|---|
@@ -134,8 +134,8 @@ See [docs/adding_a_supplier.md](docs/adding_a_supplier.md).
 | `POST` | `/api/sessions/{id}/candidates/{cid}/ignore` | Soft-delete (ignore) a supplier product |
 | `POST` | `/api/sessions/{id}/candidates/{cid}/restore` | Restore an ignored supplier product |
 | `POST` | `/api/sessions/{id}/candidates/{cid}/review` | `INCLUDE` / `EXCLUDE` / `APPROVE` |
-| `POST` | `/api/sessions/{id}/export` | Generate updated Excel |
-| `GET` | `/api/sessions/{id}/download` | Download generated Excel |
+| `POST` | `/api/sessions/{id}/export` | Generate updated Excel (Pioneers `.xls` and `.xlsx`) |
+| `GET` | `/api/sessions/{id}/download` | Download the Pioneers `.xls`; `?format=xlsx` for the `.xlsx` |
 
 ## Safety rules
 

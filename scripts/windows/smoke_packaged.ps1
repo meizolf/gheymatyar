@@ -6,8 +6,10 @@
 .DESCRIPTION
   Starts the windowed EXE with a sanitized PATH (no VS/dev redistributable
   directories), verifies identity via /api/health, runs Excel+PDF workflows for
-  both .xlsx and HTML-based .xls fixtures, asserts approved-only export
-  cell/formula integrity, rejects a genuine supplier price blocker, explicitly
+  both .xlsx and HTML-based .xls fixtures, checks that the default download is
+  Pioneers' own HTML-based .xls with only the approved rows, asserts the
+  ?format=xlsx export's cell/formula integrity, rejects a genuine supplier
+  price blocker, explicitly
   saves a mapping, restarts the EXE,
   and confirms the mapping survived. Uses the local control token for
   /api/shutdown. Force-kill is only used for emergency cleanup and fails the
@@ -49,7 +51,8 @@ $Pdf = Join-Path $RepoRoot "fixtures\suppliers\458_124550609784457.pdf"
 $DinaPdf = Join-Path $RepoRoot "fixtures\suppliers\dina_polymer_1405_07_04.pdf"
 $CompareScript = Join-Path $RepoRoot "scripts\windows\compare_export.py"
 $PriceCheckScript = Join-Path $RepoRoot "scripts\windows\check_export_price.py"
-foreach ($p in @($ExcelXlsx, $ExcelXls, $Pdf, $DinaPdf, $CompareScript, $PriceCheckScript)) {
+$LegacyCheckScript = Join-Path $RepoRoot "scripts\windows\check_legacy_xls.py"
+foreach ($p in @($ExcelXlsx, $ExcelXls, $Pdf, $DinaPdf, $CompareScript, $PriceCheckScript, $LegacyCheckScript)) {
     if (-not (Test-Path $p)) { throw "Missing required file: $p" }
 }
 
@@ -262,6 +265,31 @@ function Get-FileSha256([string]$Path) {
     return (Get-FileHash -Algorithm SHA256 -Path $Path).Hash.ToLowerInvariant()
 }
 
+# Default download: Pioneers' own HTML-based .xls with only the approved row.
+function Test-LegacyXlsExport {
+    param(
+        [string]$Sid,
+        [object]$Export,
+        [string]$ExcelPath,
+        [string]$SourceSha,
+        [string]$Code,
+        [string]$Price,
+        [string]$Label
+    )
+    if ($Export.format -ne "xls" -or -not ([string]$Export.output_filename).EndsWith(".xls")) {
+        throw "$Label default export is not the Pioneers .xls (format=$($Export.format) file=$($Export.output_filename))"
+    }
+    $outXls = Join-Path $DataDir ("smoke-out-" + $Label + ".xls")
+    Invoke-WebRequest -Uri "$Base/api/sessions/$Sid/download" -OutFile $outXls -UseBasicParsing -TimeoutSec 120
+    if ((Get-FileSha256 $outXls) -ne [string]$Export.content_sha256) {
+        throw "$Label .xls download does not match the export hash"
+    }
+    & $PythonExe $LegacyCheckScript --exported $outXls --source $ExcelPath `
+        --code $Code --price $Price --rows 1 --source-sha256 $SourceSha
+    if ($LASTEXITCODE -ne 0) { throw "Pioneers .xls check failed for $Label" }
+    Write-Host "OK Pioneers .xls download $outXls"
+}
+
 function Invoke-Workflow {
     param(
         [string]$ExcelPath,
@@ -348,8 +376,11 @@ function Invoke-Workflow {
     }
     Write-Host "OK export ($($export.updated_count) rows)"
 
+    Test-LegacyXlsExport -Sid $sid -Export $export -ExcelPath $ExcelPath `
+        -SourceSha $sourceSha -Code $keep.pioneers_code -Price $keep.new_price -Label $Label
+
     $outXlsx = Join-Path $DataDir ("smoke-out-" + $Label + ".xlsx")
-    Invoke-WebRequest -Uri "$Base/api/sessions/$sid/download" -OutFile $outXlsx -UseBasicParsing -TimeoutSec 120
+    Invoke-WebRequest -Uri "$Base/api/sessions/$sid/download?format=xlsx" -OutFile $outXlsx -UseBasicParsing -TimeoutSec 120
     if ((Get-Item $outXlsx).Length -lt 1000) {
         throw "download too small for $Label"
     }
@@ -446,9 +477,11 @@ function Invoke-ConfirmedMetreExport {
         $export.Body.exported_row_count -ne 1) {
         throw "Dina metre export failed HTTP $($export.StatusCode): $($export.Text)"
     }
-    $outXlsx = Join-Path $DataDir "smoke-out-dina-metre.xlsx"
-    Invoke-WebRequest -Uri "$Base/api/sessions/$sid/download" -OutFile $outXlsx -UseBasicParsing -TimeoutSec 120
     $expected = [string]$confirmed.new_price
+    Test-LegacyXlsExport -Sid $sid -Export $export.Body -ExcelPath $ExcelPath `
+        -SourceSha $sourceSha -Code $confirmed.pioneers_code -Price $expected -Label "dina-metre"
+    $outXlsx = Join-Path $DataDir "smoke-out-dina-metre.xlsx"
+    Invoke-WebRequest -Uri "$Base/api/sessions/$sid/download?format=xlsx" -OutFile $outXlsx -UseBasicParsing -TimeoutSec 120
     & $PythonExe $PriceCheckScript --exported $outXlsx --code $confirmed.pioneers_code --price $expected
     if ($LASTEXITCODE -ne 0) { throw "Dina metre sale cell was not the supplier price" }
 
@@ -633,4 +666,4 @@ if ($smokeFailed) {
     throw "Packaged smoke test failed"
 }
 
-Write-Host "Packaged smoke test passed (Azin XLSX/XLS + Dina metre approved-only exports + blocked price + mapping restart)."
+Write-Host "Packaged smoke test passed (Azin XLSX/XLS + Dina metre approved-only Pioneers .xls and .xlsx exports + blocked price + mapping restart)."

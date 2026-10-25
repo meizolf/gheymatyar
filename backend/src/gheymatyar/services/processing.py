@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import BinaryIO
@@ -39,6 +40,7 @@ from gheymatyar.services.pioneers_excel_writer import (
     ExcelUpdateResult,
     update_final_sale_prices,
 )
+from gheymatyar.services.pioneers_legacy_xls_writer import write_pioneers_legacy_xls
 from gheymatyar.services.price_validation import (
     DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
     IDENTITY_CONFLICT_WARNING,
@@ -80,6 +82,30 @@ def _safe_filename(name: str, *, default: str) -> str:
 _EXPORT_FINGERPRINT_KEY = "export_decision_fingerprint"
 _EXPORT_ROW_COUNT_KEY = "export_row_count"
 _EXPORT_SHA_KEY = "export_content_sha256"
+_EXPORT_LEGACY_SHA_KEY = "export_legacy_content_sha256"
+
+#: Pioneers' own HTML-based ``.xls``. Pioneers does not import the ``.xlsx``.
+EXPORT_FORMAT_XLS = "xls"
+#: The verified OpenXML workbook the ``.xls`` is rendered from.
+EXPORT_FORMAT_XLSX = "xlsx"
+EXPORT_FORMATS = (EXPORT_FORMAT_XLS, EXPORT_FORMAT_XLSX)
+DEFAULT_EXPORT_FORMAT = EXPORT_FORMAT_XLS
+EXPORT_MEDIA_TYPES = {
+    EXPORT_FORMAT_XLS: "application/vnd.ms-excel",
+    EXPORT_FORMAT_XLSX: (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    ),
+}
+
+
+@dataclass(frozen=True)
+class ExportedFile:
+    """One downloadable export file and the hash its download must carry."""
+
+    format: str
+    filename: str
+    content_sha256: str
+    exported_row_count: int
 # Persisted mapping token for each session-only or manual override, keyed by
 # supplier-product identity. An unrelated ignore must not refresh these.
 _MANUAL_BASIS_KEY = "manual_override_basis"
@@ -144,31 +170,57 @@ def decision_fingerprint(db_session: Session, supplier_id: int) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def _download_name(session: ProcessingSession) -> str:
-    if session.pioneers_filename:
-        stem = Path(session.pioneers_filename).stem
-        return f"{stem}_updated.xlsx"
-    return "pioneers_updated.xlsx"
+def _require_export_format(fmt: str) -> str:
+    if fmt not in EXPORT_FORMATS:
+        raise ValueError(
+            f"unsupported export format {fmt!r}; expected one of {', '.join(EXPORT_FORMATS)}"
+        )
+    return fmt
+
+
+def _download_name(session: ProcessingSession, fmt: str = DEFAULT_EXPORT_FORMAT) -> str:
+    stem = (
+        Path(session.pioneers_filename).stem
+        if session.pioneers_filename
+        else "pioneers"
+    )
+    return f"{stem}_updated.{fmt}"
+
+
+def _export_path(session: ProcessingSession, fmt: str) -> Path | None:
+    if fmt == EXPORT_FORMAT_XLS:
+        return session.legacy_output_path
+    return session.output_path
+
+
+def _export_available(session: ProcessingSession, fmt: str) -> bool:
+    path = _export_path(session, fmt)
+    return path is not None and path.is_file()
 
 
 def _invalidate_export(session: ProcessingSession) -> None:
-    """Drop any previously generated workbook so downloads cannot be stale."""
-    if session.output_path is not None:
+    """Drop any previously generated workbooks so downloads cannot be stale."""
+    for path in (session.output_path, session.legacy_output_path):
+        if path is None:
+            continue
         try:
-            if session.output_path.is_file():
-                session.output_path.unlink()
+            if path.is_file():
+                path.unlink()
         except OSError:
             pass
     session.output_path = None
+    session.legacy_output_path = None
     session.metadata.pop(_EXPORT_ROW_COUNT_KEY, None)
     session.metadata.pop(_EXPORT_SHA_KEY, None)
+    session.metadata.pop(_EXPORT_LEGACY_SHA_KEY, None)
 
 
 def _bound_export(
-    session: ProcessingSession, data: bytes
+    session: ProcessingSession, data: bytes, fmt: str = DEFAULT_EXPORT_FORMAT
 ) -> tuple[bytes, str, int, str] | None:
     """Return download bytes only when their hash and row count are the recorded export."""
-    recorded_sha = session.metadata.get(_EXPORT_SHA_KEY)
+    sha_key = _EXPORT_LEGACY_SHA_KEY if fmt == EXPORT_FORMAT_XLS else _EXPORT_SHA_KEY
+    recorded_sha = session.metadata.get(sha_key)
     recorded_count = session.metadata.get(_EXPORT_ROW_COUNT_KEY)
     digest = hashlib.sha256(data).hexdigest()
     if (
@@ -177,7 +229,7 @@ def _bound_export(
         or digest != recorded_sha
     ):
         return None
-    return data, _download_name(session), recorded_count, digest
+    return data, _download_name(session, fmt), recorded_count, digest
 
 
 def _clear_match_state(session: ProcessingSession) -> None:
@@ -818,36 +870,62 @@ class ProcessingService:
                     continue
             raise ValueError("decisions changed during export; retry")
 
+    def export_for_download(
+        self,
+        session_id: str,
+        db_session: Session | None = None,
+        *,
+        fmt: str = DEFAULT_EXPORT_FORMAT,
+    ) -> tuple[ExcelUpdateResult, ExportedFile]:
+        """Export, then describe the file a ``fmt`` download will serve."""
+        _require_export_format(fmt)
+        with self._store.session_lock(session_id):
+            result = self.export_excel(session_id, db_session)
+            session = self._store.require(session_id)
+            sha_key = (
+                _EXPORT_LEGACY_SHA_KEY if fmt == EXPORT_FORMAT_XLS else _EXPORT_SHA_KEY
+            )
+            return result, ExportedFile(
+                format=fmt,
+                filename=_download_name(session, fmt),
+                content_sha256=str(session.metadata[sha_key]),
+                exported_row_count=int(session.metadata[_EXPORT_ROW_COUNT_KEY]),
+            )
+
     def read_fresh_workbook(
-        self, session_id: str, db_session: Session
+        self,
+        session_id: str,
+        db_session: Session,
+        *,
+        fmt: str = DEFAULT_EXPORT_FORMAT,
     ) -> tuple[bytes, str, int, str]:
         """Return export bytes that match the current SQLite decisions.
 
-        A missing workbook stays a not-found result so an in-session review
-        change that deleted the file is not silently rewritten. A file that is
-        still on disk is served only when its decision fingerprint still
-        matches. Otherwise the session is rematched from SQLite and the
-        workbook is rewritten before any bytes are returned.
+        ``fmt`` picks the Pioneers ``.xls`` (default) or the ``.xlsx`` it was
+        rendered from. Both are written together and bound to the same
+        decisions. A missing workbook stays a not-found result so an
+        in-session review change that deleted the file is not silently
+        rewritten. A file that is still on disk is served only when its
+        decision fingerprint still matches. Otherwise the session is rematched
+        from SQLite and the workbook is rewritten before any bytes are
+        returned.
         """
+        _require_export_format(fmt)
         with self._store.session_lock(session_id):
             session = self._store.require(session_id)
             if not session.supplier_confirmed:
                 raise ValueError(
                     "Supplier has not been confirmed; confirm the detected supplier first"
                 )
-            if session.output_path is None or not session.output_path.is_file():
+            if not _export_available(session, fmt):
                 raise FileNotFoundError("export not available; run export first")
             for _ in range(4):
                 self._reconcile_saved_decisions(session, db_session)
                 current = self._workbook_stamp(session, db_session)
                 recorded = session.metadata.get(_EXPORT_FINGERPRINT_KEY)
-                if (
-                    recorded == current
-                    and session.output_path is not None
-                    and session.output_path.is_file()
-                ):
-                    data = session.output_path.read_bytes()
-                    served = _bound_export(session, data)
+                if recorded == current and _export_available(session, fmt):
+                    data = _export_path(session, fmt).read_bytes()  # type: ignore[union-attr]
+                    served = _bound_export(session, data, fmt)
                     if (
                         served is not None
                         and self._workbook_stamp(session, db_session) == recorded
@@ -857,9 +935,9 @@ class ProcessingService:
                     self._export_excel_unlocked(session, db_session)
                 except _DecisionsChanged:
                     continue
-                if session.output_path is not None and session.output_path.is_file():
-                    data = session.output_path.read_bytes()
-                    served = _bound_export(session, data)
+                if _export_available(session, fmt):
+                    data = _export_path(session, fmt).read_bytes()  # type: ignore[union-attr]
+                    served = _bound_export(session, data, fmt)
                     if served is not None and session.metadata.get(
                         _EXPORT_FINGERPRINT_KEY
                     ) == (self._workbook_stamp(session, db_session)):
@@ -1012,9 +1090,26 @@ class ProcessingService:
         if digest != result.content_sha256:
             _invalidate_export(session)
             raise ValueError("exported workbook does not match the recorded content")
+        # Pioneers imports its own HTML-based .xls, rendered from the verified
+        # workbook so both files carry the same approved rows and prices.
+        legacy_output = session.work_dir / "pioneers_updated.xls"
+        legacy_output.unlink(missing_ok=True)
+        try:
+            legacy = write_pioneers_legacy_xls(output, legacy_output)
+            if legacy.exported_row_count != result.exported_row_count:
+                raise ValueError(
+                    "Pioneers .xls export row count does not match the approved workbook"
+                )
+        except Exception:
+            _invalidate_export(session)
+            output.unlink(missing_ok=True)
+            legacy_output.unlink(missing_ok=True)
+            raise
         session.metadata[_EXPORT_ROW_COUNT_KEY] = result.exported_row_count
         session.metadata[_EXPORT_SHA_KEY] = digest
+        session.metadata[_EXPORT_LEGACY_SHA_KEY] = legacy.content_sha256
         session.output_path = output
+        session.legacy_output_path = legacy_output
         return result
 
     def preview_summary(self, session: ProcessingSession) -> dict[str, object]:

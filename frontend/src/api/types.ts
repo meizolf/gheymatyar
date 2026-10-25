@@ -120,6 +120,8 @@ export interface ProductSearchResponse {
 
 export interface ExportResponse {
   session_id: string
+  /** `xls` is Pioneers' own HTML-based .xls (the default download). */
+  format: 'xls' | 'xlsx'
   output_filename: string
   updated_count: number
   exported_row_count: number

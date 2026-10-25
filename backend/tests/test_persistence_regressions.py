@@ -99,7 +99,7 @@ def _db_path(client) -> str:
 
 def test_stale_download_does_not_return_deleted_price(client, tmp_path: Path) -> None:
     sid, _keep, drop = setup_rows(client, tmp_path)
-    exported = client.post(f"/api/sessions/{sid}/export")
+    exported = client.post(f"/api/sessions/{sid}/export?format=xlsx")
     assert exported.status_code == 200, exported.text
     original_count = exported.json()["exported_row_count"]
     assert original_count == 2
@@ -119,7 +119,7 @@ def test_stale_download_does_not_return_deleted_price(client, tmp_path: Path) ->
             == 1
         )
 
-    download = client.get(f"/api/sessions/{sid}/download")
+    download = client.get(f"/api/sessions/{sid}/download?format=xlsx")
     assert download.status_code == 200, download.text
     assert download.headers["x-exported-row-count"] == "1"
     assert download.headers["x-exported-row-count"] != str(original_count)
@@ -303,7 +303,7 @@ def test_export_only_sale_cells_change(client, tmp_path: Path) -> None:
     source = tmp_path / "named.xlsx"
     before_hash = hashlib.sha256(source.read_bytes()).hexdigest()
     assert client.post(f"/api/sessions/{sid}/export").status_code == 200
-    response = client.get(f"/api/sessions/{sid}/download")
+    response = client.get(f"/api/sessions/{sid}/download?format=xlsx")
     assert response.status_code == 200, response.text
     old = load_workbook(source, data_only=False)
     new = load_workbook(BytesIO(response.content), data_only=False)
@@ -552,7 +552,7 @@ def test_direct_export_uses_corrected_mapping(client, tmp_path: Path) -> None:
     assert correction.status_code == 200, correction.text
     exported = client.post(f"/api/sessions/{sid}/export")
     assert exported.status_code == 200, exported.text
-    downloaded = client.get(f"/api/sessions/{sid}/download")
+    downloaded = client.get(f"/api/sessions/{sid}/download?format=xlsx")
     assert downloaded.status_code == 200, downloaded.text
     old = load_workbook(tmp_path / "named.xlsx")
     new = load_workbook(BytesIO(downloaded.content))
@@ -657,7 +657,7 @@ def test_restore_preserves_unrelated_exclusion(client, tmp_path: Path) -> None:
     assert approved.json()["exportable"] is True
     exported = client.post(f"/api/sessions/{sid}/export")
     assert exported.status_code == 200, exported.text
-    downloaded = client.get(f"/api/sessions/{sid}/download")
+    downloaded = client.get(f"/api/sessions/{sid}/download?format=xlsx")
     assert downloaded.status_code == 200, downloaded.text
     source = load_workbook(tmp_path / "named.xlsx")
     output = load_workbook(BytesIO(downloaded.content))
@@ -702,7 +702,7 @@ def test_session_only_manual_mapping_survives_export(client, tmp_path: Path) -> 
     first = exported_target()
     assert first["row_number"] == drop["row_number"]
     assert first["match_type"] == "MANUAL"
-    downloaded = client.get(f"/api/sessions/{sid}/download")
+    downloaded = client.get(f"/api/sessions/{sid}/download?format=xlsx")
     assert downloaded.status_code == 200, downloaded.text
     source = load_workbook(tmp_path / "named.xlsx")
     output = load_workbook(BytesIO(downloaded.content))
@@ -761,7 +761,7 @@ def test_unrelated_ignore_does_not_hide_external_correction(
         assert saved[0] == target.code
     exported = client.post(f"/api/sessions/{sid}/export")
     assert exported.status_code == 200, exported.text
-    downloaded = client.get(f"/api/sessions/{sid}/download")
+    downloaded = client.get(f"/api/sessions/{sid}/download?format=xlsx")
     assert downloaded.status_code == 200, downloaded.text
     before = load_workbook(tmp_path / "named.xlsx")
     after = load_workbook(BytesIO(downloaded.content))
@@ -819,7 +819,7 @@ def test_unrelated_ignore_keeps_unchanged_session_override(
     kept = next(row for row in current if row["candidate_id"] == keep["candidate_id"])
     assert kept["row_number"] == drop["row_number"]
     assert kept["match_type"] == "MANUAL"
-    downloaded = client.get(f"/api/sessions/{sid}/download")
+    downloaded = client.get(f"/api/sessions/{sid}/download?format=xlsx")
     assert downloaded.status_code == 200, downloaded.text
     source = load_workbook(tmp_path / "named.xlsx")
     output = load_workbook(BytesIO(downloaded.content))

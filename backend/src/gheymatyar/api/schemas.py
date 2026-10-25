@@ -148,6 +148,9 @@ class ProductSearchResponse(BaseModel):
 
 class ExportResponse(BaseModel):
     session_id: str
+    #: ``xls`` (Pioneers HTML-based .xls, the default) or ``xlsx``.
+    format: str
+    #: Name and SHA-256 of the file ``download_path`` serves.
     output_filename: str
     updated_count: int
     exported_row_count: int

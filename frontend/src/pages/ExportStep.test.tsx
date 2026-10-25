@@ -76,7 +76,8 @@ describe('ExportStep', () => {
     expect(await screen.findByRole('button', { name: /در حال تولید/ })).toBeDisabled()
     resolveExport({
       session_id: 'sess-1',
-      output_filename: 'out.xlsx',
+      format: 'xls',
+      output_filename: 'out.xls',
       updated_count: 3,
       exported_row_count: 3,
       content_sha256: 'abc',
@@ -86,13 +87,15 @@ describe('ExportStep', () => {
       expect(api.downloadExcel).toHaveBeenCalled()
     })
     expect(await screen.findByText(/3 ردیف محصول/)).toBeInTheDocument()
+    expect(screen.getByText(/«out\.xls»/)).toBeInTheDocument()
   })
 
   it('does not show success when the exported row count disagrees', async () => {
     const user = userEvent.setup()
     vi.mocked(api.exportExcel).mockResolvedValue({
       session_id: 'sess-1',
-      output_filename: 'out.xlsx',
+      format: 'xls',
+      output_filename: 'out.xls',
       updated_count: 9,
       exported_row_count: 6700,
       content_sha256: 'abc',
@@ -113,7 +116,8 @@ describe('ExportStep', () => {
     const user = userEvent.setup()
     vi.mocked(api.exportExcel).mockResolvedValue({
       session_id: 'sess-1',
-      output_filename: 'out.xlsx',
+      format: 'xls',
+      output_filename: 'out.xls',
       updated_count: 9,
       exported_row_count: 9,
       content_sha256: 'approved-nine',

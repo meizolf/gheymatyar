@@ -466,7 +466,7 @@ def test_html_azin_xls_plus_pdf_export_workflow(client, tmp_path: Path) -> None:
     assert export.status_code == 200, export.text
     assert export.json()["updated_count"] == 1
     assert export.json()["exported_row_count"] == 1
-    download = client.get(f"/api/sessions/{sid}/download")
+    download = client.get(f"/api/sessions/{sid}/download?format=xlsx")
     assert download.status_code == 200
     exported_path = tmp_path / "azin_out.xlsx"
     exported_path.write_bytes(download.content)
