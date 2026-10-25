@@ -7,12 +7,13 @@ it checks the app's writer independently.
 Asserts:
   * the export starts with the OLE2 signature, is not HTML or a zip/.xlsx,
     and ``xlrd`` reads it as a single-sheet BIFF8 (Excel 97–2003) workbook
-  * the header row is text and equals the source header row, spacing and
-    column order included (all 40 Pioneers columns)
-  * the export holds exactly ``--rows`` product rows, all present in the source
-  * the product with ``--code`` has a numeric ``نرخ فروش اصلی`` == ``--price``
-  * every other cell of each exported row equals the source cell text, and
-    text Excel would alter (e.g. leading-zero ``015113``) is still text
+  * the sheet has exactly three text headers, in this order:
+    ``کد کالا``, ``نام کالا``, ``نرخ فروش اصلی``
+  * the export holds exactly ``--rows`` product rows and no other cells
+  * every code is text, appears once, and is a code in the source file
+  * every name is text and equals that product's source name exactly
+  * every price is a positive whole number (Rial)
+  * the product with ``--code`` has the price ``--price``
   * the source SHA-256 matches ``--source-sha256`` when given
 """
 
@@ -28,6 +29,8 @@ import xlrd
 
 SALE_HEADER = "نرخ فروش اصلی"
 CODE_HEADER = "کد کالا"
+NAME_HEADER = "نـــام کــالا"  # as Pioneers spells it in the source
+EXPORT_HEADERS = ("کد کالا", "نام کالا", "نرخ فروش اصلی")
 OLE2 = bytes.fromhex("D0CF11E0A1B11AE1")
 
 
@@ -83,22 +86,6 @@ def _source_rows(source: Path) -> list[list[str]]:
     return [row[:width] + [""] * (width - len(row[:width])) for row in rows]
 
 
-def _cell_text(cell: xlrd.sheet.Cell) -> str:
-    """The text a typed cell stands for, as a Pioneers export spells it."""
-    if cell.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
-        return ""
-    if cell.ctype == xlrd.XL_CELL_TEXT:
-        return cell.value
-    if cell.ctype == xlrd.XL_CELL_BOOLEAN:
-        return "True" if cell.value else "False"
-    if cell.ctype == xlrd.XL_CELL_NUMBER:
-        value = float(cell.value)
-        if value.is_integer():
-            return str(int(value))
-        return format(Decimal(repr(value)), "f")
-    raise SystemExit(f"unexpected cell type {xlrd.sheet.ctype_text.get(cell.ctype)}")
-
-
 def check(
     exported: Path,
     source: Path,
@@ -125,54 +112,51 @@ def check(
     if book.nsheets != 1:
         raise SystemExit(f"expected one worksheet, found {book.nsheets}")
     sheet = book.sheet_by_index(0)
-
-    src_rows = _source_rows(source)
+    if sheet.ncols != len(EXPORT_HEADERS):
+        raise SystemExit(f"expected exactly 3 columns, found {sheet.ncols}")
     header = sheet.row(0)
-    if any(cell.ctype not in (xlrd.XL_CELL_TEXT, xlrd.XL_CELL_EMPTY) for cell in header):
-        raise SystemExit("export header cells must be text")
-    out_header = [_cell_text(cell) for cell in header]
-    if out_header != src_rows[0]:
-        raise SystemExit("export header row differs from the source header row")
-    headers = [value.strip() for value in out_header]
-    sale = headers.index(SALE_HEADER)
-    code_index = headers.index(CODE_HEADER)
+    if [cell.value for cell in header] != list(EXPORT_HEADERS) or any(
+        cell.ctype != xlrd.XL_CELL_TEXT for cell in header
+    ):
+        raise SystemExit(f"header must be {EXPORT_HEADERS!r} as text")
     if sheet.nrows - 1 != rows:
         raise SystemExit(f"expected exactly {rows} product rows, got {sheet.nrows - 1}")
 
-    by_code = {row[code_index].strip(): row for row in src_rows[1:]}
+    src_rows = _source_rows(source)
+    headers = [value.strip() for value in src_rows[0]]
+    src_code, src_name = headers.index(CODE_HEADER), headers.index(NAME_HEADER)
+    names = {row[src_code].strip(): row[src_name] for row in src_rows[1:]}
+    seen: set[str] = set()
     found = None
     for row_index in range(1, sheet.nrows):
-        cells = sheet.row(row_index)
-        if len(cells) != len(src_rows[0]):
-            raise SystemExit(f"product row {row_index} has {len(cells)} cells")
-        texts = [_cell_text(cell) for cell in cells]
-        src_row = by_code.get(texts[code_index].strip())
-        if src_row is None:
-            raise SystemExit(f"exported code {texts[code_index]!r} is not in the source")
-        for column, (got, want) in enumerate(zip(texts, src_row)):
-            if column == sale:
-                continue
-            if got != want:
-                raise SystemExit(
-                    f"code {texts[code_index]}: column {headers[column]!r} changed "
-                    f"from {want!r} to {got!r}"
-                )
-        if cells[sale].ctype != xlrd.XL_CELL_NUMBER:
-            raise SystemExit(f"code {texts[code_index]}: sale price is not a number")
-        if texts[code_index].strip() == code.strip():
-            if found is not None:
-                raise SystemExit(f"approved code {code!r} appears more than once")
-            found = texts[sale]
+        code_cell, name_cell, price_cell = sheet.row(row_index)
+        if code_cell.ctype != xlrd.XL_CELL_TEXT or not code_cell.value:
+            raise SystemExit(f"row {row_index + 1}: product code must be text")
+        product = code_cell.value
+        if product in seen:
+            raise SystemExit(f"code {product} appears more than once")
+        seen.add(product)
+        if product not in names:
+            raise SystemExit(f"exported code {product!r} is not in the source")
+        if name_cell.ctype != xlrd.XL_CELL_TEXT or name_cell.value != names[product]:
+            raise SystemExit(
+                f"code {product}: name {name_cell.value!r} is not the source name "
+                f"{names[product]!r}"
+            )
+        value = price_cell.value
+        if price_cell.ctype != xlrd.XL_CELL_NUMBER or value <= 0 or not float(value).is_integer():
+            raise SystemExit(f"code {product}: price must be a positive whole Rial number")
+        if product == code.strip():
+            found = int(value)
     if found is None:
         raise SystemExit(f"approved code {code!r} is not in the export")
     try:
-        got = Decimal(found)
         want = Decimal(price.replace(",", "").strip())
     except InvalidOperation as exc:
         raise SystemExit("invalid sale price") from exc
-    if got != want:
-        raise SystemExit(f"sale price mismatch for code {code}: {found!r} != {price!r}")
-    print(f"OK check_legacy_xls: BIFF8 .xls with {rows} row(s); code {code} == {want}")
+    if Decimal(found) != want:
+        raise SystemExit(f"sale price mismatch for code {code}: {found} != {price!r}")
+    print(f"OK check_legacy_xls: 3-column BIFF8 .xls, {rows} row(s); code {code} == {want}")
 
 
 def main(argv: list[str] | None = None) -> int:

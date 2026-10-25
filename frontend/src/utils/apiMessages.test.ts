@@ -6,6 +6,14 @@ describe('translateApiDetail', () => {
     expect(translateApiDetail('session not found')).toMatch(/منقضی/)
   })
 
+  it('names the approved product that has no product code', () => {
+    const fa = translateApiDetail(
+      'Approved product «اذین بوشن 20» has no product code; Pioneers updates prices by product code',
+    )
+    expect(fa).toMatch(/«اذین بوشن 20»/)
+    expect(fa).toMatch(/کد کالا ندارد/)
+  })
+
   it('translates positive and negative price threshold warnings', () => {
     expect(
       translateApiDetail('price change 70.21% exceeds 30% threshold'),

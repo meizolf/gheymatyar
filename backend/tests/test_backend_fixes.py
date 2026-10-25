@@ -9,7 +9,7 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 from sqlalchemy import create_engine, inspect, text
 
 from gheymatyar.db import Database
@@ -734,7 +734,10 @@ def test_match_uses_saved_threshold(client, pioneers_azin_excel: Path, azin_pdf:
 # --- 6. Optional codes ---
 
 
-def test_name_only_product_matches_and_exports(tmp_path: Path, db: Database) -> None:
+def test_name_only_product_matches_but_export_needs_a_code(
+    tmp_path: Path, db: Database
+) -> None:
+    """Matching and approval work by name; Pioneers imports prices by code."""
     excel = tmp_path / "name_only.xlsx"
     _write_xlsx(excel, [[None, "اذین بوشن 20", "100000"]])
     result = PioneersExcelParser().parse(excel)
@@ -768,13 +771,13 @@ def test_name_only_product_matches_and_exports(tmp_path: Path, db: Database) -> 
         candidate_id=matched.candidate_id,
         decision=ReviewDecision.APPROVE,
     )
-    exported = svc.export_excel(session.session_id)
-    assert exported.updated_count == 1
-    wb = load_workbook(exported.output_path, read_only=True, data_only=True)
-    ws = wb.active
-    row = [c.value for c in next(ws.iter_rows(min_row=2, max_row=2))]
-    assert str(row[2]) == "204600"
-    wb.close()
+    approved = svc.get_session(session.session_id).get_candidate(matched.candidate_id)
+    assert approved is not None and approved.review_decision is ReviewDecision.APPROVE
+    with pytest.raises(ValueError, match=r"«اذین بوشن 20» has no product code"):
+        svc.export_excel(session.session_id)
+    session = svc.get_session(session.session_id)
+    assert session.output_path is None and session.legacy_output_path is None
+    assert not list(session.work_dir.glob("pioneers_updated.*"))
 
 
 # --- 7. Invalid row diagnostics in API ---

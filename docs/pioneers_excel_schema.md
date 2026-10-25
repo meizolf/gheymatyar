@@ -25,13 +25,14 @@ Pioneers' own export, read on upload. Pioneers does **not** import this HTML for
 
 ## Export format: Excel 97–2003 `.xls` (BIFF8)
 
-Pioneers imported its HTML export after Microsoft Excel saved it as "Excel 97–2003 Workbook (*.xls)". GheymatYar writes that format directly with `xlwt`:
+Pioneers imports an "Excel 97–2003 Workbook (*.xls)" and updates prices from the product code and main sale price. GheymatYar writes that format directly with `xlwt`:
 
 - An OLE2 container (signature `D0 CF 11 E0 A1 B1 1A E1`), BIFF8, UTF-16 text (codepage 1200), and one sheet `لیست کالا` (right-to-left).
-- Row 1 holds the 40 header cells as exact text, spacing included. It is followed by the approved product rows only.
-- Cell types follow Excel's conversion where nothing is lost: plain numbers become numbers and `True`/`False` become booleans. Text that Excel would change stays text. That covers leading zeros (`015113`), more than 15 significant digits, trailing decimal zeros, and anything with spaces or letters (`219 عدد`).
-- `نرخ فروش اصلی` (AK) is a number. B Yekan 10pt, a bold grey header, and `#F5F5F5`/`#FFFFFF` row stripes follow the Pioneers look.
+- There are exactly three columns: `کد کالا`, `نام کالا`, `نرخ فروش اصلی`. The export header is spelled `نام کالا`, without the source's `ـ` stretch characters.
+- `کد کالا` is text in Excel's Text format (`@`), so leading zeros are kept. `نام کالا` is the exact source cell text. 493 real names have leading or trailing spaces, so the name is not the trimmed parsed name. `نرخ فروش اصلی` is the approved whole-Rial price, as a number.
+- There is one row per approved, changed product, in sheet order. Each row is checked against the verified approved workbook and its change list.
 - Before publishing, the file is read back with `xlrd` and every typed cell is compared. `scripts/windows/check_legacy_xls.py` repeats that check independently.
+- Known limitation, predating this format: the `.xlsx` writer's post-save check cannot find a row whose code is a zero-padded *numeric* cell (e.g. `456` shown as `00456`). Pioneers files store codes as text, so this is not seen in practice.
 
 `.gitattributes` marks `fixtures/**` as `-text`. Otherwise a Windows checkout turns these files' LF line endings into CRLF. Also note that `core.autocrlf=input` converts CRLF to LF on commit, so a committed file's line endings do not show what Pioneers wrote.
 

@@ -46,6 +46,11 @@ const PATTERNS: Array<{ re: RegExp; fa: string | ((m: RegExpMatchArray) => strin
     fa: (m) => `محصول پایونیرز در ردیف ${m[1]} یافت نشد.`,
   },
   {
+    re: /Approved product «(.+?)» has no product code/i,
+    fa: (m) =>
+      `کالای «${m[1]}» در پایونیرز کد کالا ندارد و پایونیرز قیمت را با کد کالا به‌روز می‌کند. کد کالا را در پایونیرز ثبت کنید یا این کالا را از خروجی حذف کنید.`,
+  },
+  {
     re: /no approved updates available for export/i,
     fa: 'هیچ به‌روزرسانی تأییدشده‌ای برای خروجی وجود ندارد. ابتدا قیمت‌های تغییرکرده را تأیید کنید.',
   },

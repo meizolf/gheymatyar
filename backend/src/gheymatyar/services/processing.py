@@ -1095,7 +1095,7 @@ class ProcessingService:
         legacy_output = session.work_dir / "pioneers_updated.xls"
         legacy_output.unlink(missing_ok=True)
         try:
-            legacy = write_pioneers_legacy_xls(output, legacy_output)
+            legacy = write_pioneers_legacy_xls(output, legacy_output, result.changes)
             if legacy.exported_row_count != result.exported_row_count:
                 raise ValueError(
                     "Pioneers .xls export row count does not match the approved workbook"

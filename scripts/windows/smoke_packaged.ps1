@@ -7,7 +7,8 @@
   Starts the windowed EXE with a sanitized PATH (no VS/dev redistributable
   directories), verifies identity via /api/health, runs Excel+PDF workflows for
   both .xlsx and HTML-based .xls fixtures, checks that the default download is
-  a genuine Excel 97–2003 (BIFF8) .xls with only the approved rows, asserts the
+  a genuine Excel 97–2003 (BIFF8) .xls with only کد کالا / نام کالا /
+  نرخ فروش اصلی for the approved rows, asserts the
   ?format=xlsx export's cell/formula integrity, rejects a genuine supplier
   price blocker, explicitly
   saves a mapping, restarts the EXE,
@@ -265,7 +266,7 @@ function Get-FileSha256([string]$Path) {
     return (Get-FileHash -Algorithm SHA256 -Path $Path).Hash.ToLowerInvariant()
 }
 
-# Default download: an Excel 97–2003 (BIFF8) .xls with only the approved row.
+# Default download: a 3-column Excel 97–2003 (BIFF8) .xls with only the approved row.
 function Test-LegacyXlsExport {
     param(
         [string]$Sid,
