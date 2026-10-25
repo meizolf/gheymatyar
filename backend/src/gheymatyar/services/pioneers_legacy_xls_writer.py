@@ -2,9 +2,10 @@
 
 Pioneers ``گزارش لیست کالا.xls`` files are not OLE/BIFF workbooks. They are
 UTF-8 (with BOM) HTML documents with one ``<Table>``: ``<Html>``, ``<Body>``,
-``<Table>``, one ``<tr>`` per row, and one ``<td>`` per line. Header cells and
-data cells each use a single fixed opening tag. Lines end with ``\\n`` and the
-text is written as is: Pioneers does not escape quotes.
+``<Table>``, one ``<tr>`` per row, and one ``<td>`` per line. Header cells use
+one fixed opening tag and product rows alternate between two, by position.
+Lines end with ``\\n`` and the text is written as is: Pioneers does not escape
+quotes. Cell text, header spacing included, comes from the uploaded file.
 
 This writer does not pick rows or prices. It renders the workbook that
 ``update_final_sale_prices`` has already produced and verified, so the same
@@ -44,17 +45,29 @@ from gheymatyar.services.errors import PioneersExcelWriteError
 
 _BOM = "﻿"
 _NEWLINE = "\n"
-# Opening tags copied from Pioneers exports (fixtures/pioneers/*.xls).
+# Opening tags copied verbatim from a full Pioneers export (6,774 products).
+# The header tag has two spaces before font-weight. Data rows alternate
+# #F5F5F5 / #FFFFFF, starting with #F5F5F5 on the first product row.
 HEADER_CELL_OPEN = (
     '<td colspan="1" dir="rtl" align="center" style="border-style: solid; '
-    "border-width: 1px; font-family: 'B Yekan'; font-size: 10px; "
+    "border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  "
     'font-weight: bold; background-color: #C0C0C0;">'
 )
-DATA_CELL_OPEN = (
+ODD_ROW_CELL_OPEN = (
+    '<td colspan="1" dir="rtl" align="center" style="border-style: solid; '
+    "border-width: 1px; font-family: 'B Yekan'; font-size: 10px; "
+    'background-color: #F5F5F5;">'
+)
+EVEN_ROW_CELL_OPEN = (
     '<td colspan="1" dir="rtl" align="center" style="border-style: solid; '
     "border-width: 1px; font-family: 'B Yekan'; font-size: 10px; "
     'background-color: #FFFFFF;">'
 )
+
+
+def data_cell_open(product_index: int) -> str:
+    """Opening tag for the 1-based ``product_index``-th product row."""
+    return ODD_ROW_CELL_OPEN if product_index % 2 == 1 else EVEN_ROW_CELL_OPEN
 _DOCUMENT_START = ("<Html>", "<Body>", "<Table>")
 _DOCUMENT_END = ("</Table>", "</Body>", "</Html>")
 _REQUIRED_HEADERS = (HEADER_CODE, HEADER_NAME, HEADER_SALE_PRICE)
@@ -104,7 +117,7 @@ def render_pioneers_html_xls(rows: Sequence[Sequence[str]]) -> bytes:
         )
     lines = [*_DOCUMENT_START]
     for index, row in enumerate(rows):
-        cell_open = HEADER_CELL_OPEN if index == 0 else DATA_CELL_OPEN
+        cell_open = HEADER_CELL_OPEN if index == 0 else data_cell_open(index)
         lines.append("<tr>")
         lines.extend(f"{cell_open}{_escape(value)}</td>" for value in row)
         lines.append("</tr>")

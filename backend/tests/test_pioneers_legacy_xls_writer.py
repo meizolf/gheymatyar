@@ -23,9 +23,11 @@ from gheymatyar.parsers.pioneers_html_xls import (
 )
 from gheymatyar.services.pioneers_excel_writer import update_final_sale_prices
 from gheymatyar.services.pioneers_legacy_xls_writer import (
-    DATA_CELL_OPEN,
+    EVEN_ROW_CELL_OPEN,
     HEADER_CELL_OPEN,
+    ODD_ROW_CELL_OPEN,
     LegacyXlsWriteError,
+    data_cell_open,
     write_pioneers_legacy_xls,
 )
 from gheymatyar.services.processing import ProcessingService
@@ -36,6 +38,9 @@ from .conftest import FIXTURES
 AZIN_XLS = FIXTURES / "pioneers" / "pioneers_azin_subset.xls"
 AZIN_XLSX = FIXTURES / "pioneers" / "pioneers_azin_subset.xlsx"
 SAMPLE_XLS = FIXTURES / "pioneers" / "pioneers_html_sample.xls"
+# Real Pioneers markup: the header block and tags of a full export, holding
+# the products of pioneers_html_sample.xls, striped by row position.
+REAL_MARKUP_XLS = FIXTURES / "pioneers" / "pioneers_real_markup.xls"
 DOCUMENT_START = ["<Html>", "<Body>", "<Table>"]
 DOCUMENT_END = ["</Table>", "</Body>", "</Html>", ""]
 
@@ -85,24 +90,39 @@ def _updates(rows: list[list[str]], picks: list[int], prices: list[str]) -> list
     ]
 
 
+def _cell_body(line: str) -> str:
+    """A ``<td …>text</td>`` line without its opening tag."""
+    assert line.startswith("<td ") and line.endswith("</td>"), line[:60]
+    return line[line.index(">") + 1 :]
+
+
 def _assert_matches_original(
     original: Path, exported: Path, picks: list[int], prices: list[str]
 ) -> None:
-    """Exported lines equal the source lines, except each sale price cell."""
+    """Pioneers tags by position; cell text equals the source except the sale price."""
     source_blocks = _row_blocks(_lines(original))
     out_blocks = _row_blocks(_lines(exported))
-    assert out_blocks[0] == source_blocks[0]
+    assert all(line.startswith(HEADER_CELL_OPEN) for line in out_blocks[0][1:-1])
+    assert [_cell_body(line) for line in out_blocks[0][1:-1]] == [
+        _cell_body(line) for line in source_blocks[0][1:-1]
+    ]
     assert len(out_blocks) - 1 == len(picks)
     sale_line = 1 + _sale_column(read_pioneers_html_xls_rows(original)[0])
-    for out_block, pick, price in zip(out_blocks[1:], picks, prices):
+    for position, (out_block, pick, price) in enumerate(
+        zip(out_blocks[1:], picks, prices), start=1
+    ):
         source_block = source_blocks[pick - 1]
         assert len(out_block) == len(source_block)
-        for index, (got, want) in enumerate(zip(out_block, source_block)):
+        assert (out_block[0], out_block[-1]) == ("<tr>", "</tr>")
+        tag = data_cell_open(position)
+        for index in range(1, len(out_block) - 1):
+            got, want = out_block[index], source_block[index]
+            assert got.startswith(tag), (pick, index)
             if index == sale_line:
-                assert got == f"{DATA_CELL_OPEN}{price}</td>"
-                assert got != want
+                assert _cell_body(got) == f"{price}</td>"
+                assert _cell_body(got) != _cell_body(want)
             else:
-                assert got == want, (pick, index)
+                assert _cell_body(got) == _cell_body(want), (pick, index)
 
 
 @pytest.mark.parametrize(
@@ -112,6 +132,7 @@ def _assert_matches_original(
         (AZIN_XLS, [2, 3, 20, 40, 64, 80, 100, 125, 151]),
         # Row 7 holds نیوپایپ"بست کلکتور 1"" کد 15113.
         (SAMPLE_XLS, [3, 7]),
+        (REAL_MARKUP_XLS, [4, 7]),
     ],
 )
 def test_xls_source_export_is_byte_identical_except_sale_price(
@@ -130,6 +151,43 @@ def test_xls_source_export_is_byte_identical_except_sale_price(
     assert result.content_sha256 == _sha256(tmp_path / "approved.xls")
     _assert_matches_original(original, tmp_path / "approved.xls", picks, prices)
     assert _sha256(original) == before
+
+
+def test_leading_rows_of_a_real_pioneers_export_round_trip_byte_for_byte(
+    tmp_path: Path,
+) -> None:
+    """The first products keep their positions, so only sale cells may differ."""
+    rows = read_pioneers_html_xls_rows(REAL_MARKUP_XLS)
+    # Product 14867 (row 6) has an empty name in Pioneers and cannot be approved.
+    picks = [2, 3, 4, 5]
+    prices = [str(9_000_000 + index) for index in range(len(picks))]
+    converted = convert_pioneers_html_xls_to_xlsx(REAL_MARKUP_XLS, tmp_path / "w.xlsx")
+    update_final_sale_prices(converted, tmp_path / "a.xlsx", _updates(rows, picks, prices))
+
+    write_pioneers_legacy_xls(tmp_path / "a.xlsx", tmp_path / "out.xls")
+
+    blocks = _row_blocks(_lines(REAL_MARKUP_XLS))
+    sale_line = 1 + _sale_column(rows[0])
+    expected = [*DOCUMENT_START, *blocks[0]]
+    for block, price in zip(blocks[1 : 1 + len(picks)], prices):
+        block = list(block)
+        block[sale_line] = block[sale_line][: block[sale_line].index(">") + 1] + f"{price}</td>"
+        expected.extend(block)
+    expected.extend(DOCUMENT_END)
+    assert (tmp_path / "out.xls").read_bytes() == (
+        "\ufeff" + "\n".join(expected)
+    ).encode("utf-8")
+    # Header cells keep Pioneers' own spacing, e.g. ' کد تامین کننده :'.
+    assert " کد تامین کننده :" in rows[0]
+
+
+def test_writer_tags_are_the_real_pioneers_tags() -> None:
+    blocks = _row_blocks(_lines(REAL_MARKUP_XLS))
+    assert blocks[0][1].startswith(HEADER_CELL_OPEN)
+    assert "10px;  font-weight: bold" in HEADER_CELL_OPEN
+    assert blocks[1][1].startswith(ODD_ROW_CELL_OPEN)
+    assert blocks[2][1].startswith(EVEN_ROW_CELL_OPEN)
+    assert "#F5F5F5" in ODD_ROW_CELL_OPEN and "#FFFFFF" in EVEN_ROW_CELL_OPEN
 
 
 def test_xlsx_source_renders_the_pioneers_xls_layout(tmp_path: Path) -> None:
@@ -172,12 +230,12 @@ def test_cells_are_written_as_pioneers_text_and_markup_is_escaped(
     header, product = _row_blocks(lines)
     assert all(line.startswith(HEADER_CELL_OPEN) for line in header[1:-1])
     assert product[1:-1] == [
-        f"{DATA_CELL_OPEN}7</td>",
-        f"{DATA_CELL_OPEN}True</td>",
-        f"{DATA_CELL_OPEN}100</td>",
-        f'{DATA_CELL_OPEN}لوله &lt;A&gt; &amp; "B"</td>',
-        f"{DATA_CELL_OPEN}12</td>",
-        f"{DATA_CELL_OPEN}4610000</td>",
+        f"{ODD_ROW_CELL_OPEN}7</td>",
+        f"{ODD_ROW_CELL_OPEN}True</td>",
+        f"{ODD_ROW_CELL_OPEN}100</td>",
+        f'{ODD_ROW_CELL_OPEN}لوله &lt;A&gt; &amp; "B"</td>',
+        f"{ODD_ROW_CELL_OPEN}12</td>",
+        f"{ODD_ROW_CELL_OPEN}4610000</td>",
     ]
     assert read_pioneers_html_xls_rows(tmp_path / "out.xls")[1] == [
         "7", "True", "100", 'لوله <A> & "B"', "12", "4610000",
@@ -220,7 +278,7 @@ def _large_html_catalog(path: Path, rows: int) -> list[list[str]]:
     out = [*DOCUMENT_START, *blocks[0]]
     for index in range(rows):
         block = list(blocks[1 + index % (len(blocks) - 1)])
-        block[code] = f"{DATA_CELL_OPEN}{900000 + index}</td>"
+        block[code] = block[code][: block[code].index(">") + 1] + f"{900000 + index}</td>"
         block[name] = block[name].replace("</td>", f" نسخه {index}</td>")
         out.extend(block)
     out.extend(DOCUMENT_END)
@@ -303,3 +361,66 @@ def test_failed_xls_render_leaves_no_export(
     assert session.output_path is None
     assert session.legacy_output_path is None
     assert not list(session.work_dir.glob("pioneers_updated.*"))
+
+
+def test_crlf_copy_of_a_pioneers_xls_still_exports_lf_pioneers_markup(
+    tmp_path: Path,
+) -> None:
+    """A Windows checkout or editor may turn LF into CRLF; Pioneers writes LF."""
+    crlf = tmp_path / "crlf.xls"
+    crlf.write_bytes(REAL_MARKUP_XLS.read_bytes().replace(b"\n", b"\r\n"))
+    rows = read_pioneers_html_xls_rows(crlf)
+    assert rows == read_pioneers_html_xls_rows(REAL_MARKUP_XLS)
+    converted = convert_pioneers_html_xls_to_xlsx(crlf, tmp_path / "w.xlsx")
+    update_final_sale_prices(
+        converted, tmp_path / "a.xlsx", _updates(rows, [3, 7], ["111", "222"])
+    )
+
+    write_pioneers_legacy_xls(tmp_path / "a.xlsx", tmp_path / "out.xls")
+
+    _assert_matches_original(
+        REAL_MARKUP_XLS, tmp_path / "out.xls", [3, 7], ["111", "222"]
+    )
+
+
+def _run_checker(exported: Path, source: Path, code: str, price: str, rows: int):
+    import subprocess
+    import sys
+
+    from .conftest import REPO_ROOT
+
+    return subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "windows" / "check_legacy_xls.py"),
+            "--exported", str(exported), "--source", str(source),
+            "--code", code, "--price", price, "--rows", str(rows),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_check_legacy_xls_script_rejects_altered_markup_and_values(
+    tmp_path: Path,
+) -> None:
+    rows = read_pioneers_html_xls_rows(REAL_MARKUP_XLS)
+    converted = convert_pioneers_html_xls_to_xlsx(REAL_MARKUP_XLS, tmp_path / "w.xlsx")
+    update_final_sale_prices(
+        converted, tmp_path / "a.xlsx", _updates(rows, [3, 7], ["111", "222"])
+    )
+    write_pioneers_legacy_xls(tmp_path / "a.xlsx", tmp_path / "good.xls")
+    good = (tmp_path / "good.xls").read_bytes()
+    code = rows[2][3]
+
+    ok = _run_checker(tmp_path / "good.xls", REAL_MARKUP_XLS, code, "111", 2)
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+
+    one_colour = good.replace(b"#FFFFFF", b"#F5F5F5")
+    changed_value = good.replace("پارس پلاست".encode(), "پارس  پلاست".encode(), 1)
+    for name, data in (("stripe", one_colour), ("value", changed_value), ("crlf", good.replace(b"\n", b"\r\n"))):
+        bad = tmp_path / f"bad-{name}.xls"
+        bad.write_bytes(data)
+        assert data != good
+        result = _run_checker(bad, REAL_MARKUP_XLS, code, "111", 2)
+        assert result.returncode != 0, name

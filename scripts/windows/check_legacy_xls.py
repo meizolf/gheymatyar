@@ -6,13 +6,14 @@ Does not import the application, so it checks the app's writer independently.
 Asserts:
   * the export is a UTF-8 (BOM) HTML ``.xls`` with Pioneers' document layout
     (``<Html>``, ``<Body>``, ``<Table>``, one ``<td>`` per line, ``\\n`` line
-    endings) and only Pioneers' header and data cell tags
+    endings), Pioneers' header tag, and product rows striped by position
+    (``#F5F5F5`` first, then ``#FFFFFF``), as in a full Pioneers export
   * the header row equals the source header row, in the same column order
   * the export holds exactly ``--rows`` product rows, all present in the source
   * the product with ``--code`` has ``نرخ فروش اصلی`` == ``--price``
   * every other cell of each exported row equals the source row
-  * for an HTML ``.xls`` source, every exported line is byte-identical to the
-    source line except the ``نرخ فروش اصلی`` cell
+  * for an HTML ``.xls`` source, the text of every exported cell line is
+    byte-identical to the source line except the ``نرخ فروش اصلی`` cell
   * the source SHA-256 matches ``--source-sha256`` when given
 """
 
@@ -27,16 +28,27 @@ from pathlib import Path
 SALE_HEADER = "نرخ فروش اصلی"
 CODE_HEADER = "کد کالا"
 BOM = b"\xef\xbb\xbf"
+# Tags of a full Pioneers export. The header has two spaces before font-weight.
 HEADER_TD = (
     '<td colspan="1" dir="rtl" align="center" style="border-style: solid; '
-    "border-width: 1px; font-family: 'B Yekan'; font-size: 10px; "
+    "border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  "
     'font-weight: bold; background-color: #C0C0C0;">'
 )
-DATA_TD = (
+ROW_TDS = tuple(
     '<td colspan="1" dir="rtl" align="center" style="border-style: solid; '
     "border-width: 1px; font-family: 'B Yekan'; font-size: 10px; "
-    'background-color: #FFFFFF;">'
+    f'background-color: {color};">'
+    for color in ("#F5F5F5", "#FFFFFF")
 )
+
+
+def _expected_td(row_index: int) -> str:
+    """Tag for block ``row_index`` (0 is the header)."""
+    return HEADER_TD if row_index == 0 else ROW_TDS[(row_index - 1) % 2]
+
+
+def _cell_body(line: str) -> str:
+    return line[line.index(">") + 1 :]
 
 
 class _Cells(HTMLParser):
@@ -86,7 +98,8 @@ def _row_blocks(lines: list[str]) -> list[list[str]]:
 def _source_rows(source: Path) -> tuple[list[list[str]], list[list[str]] | None]:
     raw = source.read_bytes()
     if raw.startswith(BOM) or raw.lstrip()[:6].lower() == b"<html>":
-        text = raw.decode("utf-8-sig")
+        # A Windows checkout may hold CRLF; Pioneers itself writes LF.
+        text = raw.decode("utf-8-sig").replace("\r\n", "\n")
         return _html_rows(text), _row_blocks(text.split("\n"))
     from openpyxl import load_workbook
 
@@ -137,7 +150,7 @@ def check(
         raise SystemExit("export does not have the Pioneers <Html><Body><Table> layout")
     blocks = _row_blocks(lines)
     for index, block in enumerate(blocks):
-        expected_open = HEADER_TD if index == 0 else DATA_TD
+        expected_open = _expected_td(index)
         for line in block[1:-1]:
             if not (line.startswith(expected_open) and line.endswith("</td>")):
                 raise SystemExit(f"row {index + 1} has a non-Pioneers cell line: {line[:80]!r}")
@@ -171,7 +184,11 @@ def check(
         if src_blocks is not None:
             out_block, src_block = blocks[out_index], src_blocks[src_index]
             for line_index, (got, want) in enumerate(zip(out_block, src_block)):
-                if line_index != sale + 1 and got != want:
+                if line_index in (0, len(out_block) - 1):
+                    if got != want:
+                        raise SystemExit(f"code {row[code_index]}: row markup differs")
+                    continue
+                if line_index != sale + 1 and _cell_body(got) != _cell_body(want):
                     raise SystemExit(
                         f"code {row[code_index]}: source line {line_index} is not byte-identical"
                     )

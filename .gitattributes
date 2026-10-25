@@ -1,0 +1,4 @@
+# Fixtures are byte-exact inputs. Pioneers .xls exports are HTML text, so
+# without this a Windows checkout (core.autocrlf=true) rewrites their LF line
+# endings as CRLF and byte-level export tests compare against altered files.
+fixtures/** -text

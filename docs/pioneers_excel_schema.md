@@ -11,6 +11,20 @@ The earlier attachment `گزارش لیست کالا - Copy.xls` was an Excel HT
 
 HTML→XLSX conversion preserves cell values, column order, and row order. It does **not** preserve per-cell HTML styles (B Yekan, borders, background), `dir`/`align` attributes, or the HTML wrapper itself.
 
+## Original HTML `.xls` markup (export format)
+
+The approved export is written back in this format (`services/pioneers_legacy_xls_writer.py`). Facts from the full 6,774-product original:
+
+- UTF-8 with BOM, `\n` line endings (no CR), no HTML entities. Quotes are written raw (`"""1*32"`).
+- `<Html>`, `<Body>`, `<Table>`, then one `<tr>` line, one `<td>` line per cell, and `</tr>`. It ends with `</Table>`, `</Body>`, `</Html>` and a final newline.
+- Every header cell uses one tag. It has **two** spaces before `font-weight: bold` and the background `#C0C0C0`.
+- Product rows alternate `#F5F5F5` and `#FFFFFF` by position, starting with `#F5F5F5`. All cells in a row share the row's tag.
+- Some header cells keep surrounding spaces, e.g. `'سایر مشخصات 2 : '` and `' کد تامین کننده :'`.
+
+`pioneers_html_sample.xls` and `pioneers_azin_subset.xls` are normalized copies. They have one space in the header tag, all-white rows, and trimmed header text. Do not use them as the markup reference. `pioneers_real_markup.xls` keeps the original header block and tags, and holds the six products of `pioneers_html_sample.xls`, striped by position.
+
+`.gitattributes` marks `fixtures/**` as `-text`. Otherwise a Windows checkout turns these files' LF line endings into CRLF. Also note that `core.autocrlf=input` converts CRLF to LF on commit, so a committed file's line endings do not show what Pioneers wrote.
+
 Do not treat this document as a guess. Items that could not be confirmed from the file are listed under **Unknowns**.
 
 **Pioneers re-import:** Successful `.xlsx` generation does not prove Pioneers will accept the file. Verify with an actual import into Pioneers.

@@ -1,0 +1,300 @@
+﻿<Html>
+<Body>
+<Table>
+<tr>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">انتخاب</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">ردیف</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">فعال</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">کد کالا</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">نـــام کــالا</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">بارکد</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">کد رده</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">نام رده</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">نقطه سفارش</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">حداکثر نقطه سفارش</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">درصد تخفیف</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">درصد تخفیف پنل فروش</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">درصد تخفیف نقدی</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">درصد مالیات</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">درصد پورسانت</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">تعداد آمپر</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">نرخ آمپر</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">مدت تسویه (روز)</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">سایر مشخصات 2 : </td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">سایر مشخصات 1 : </td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">مرکز پخش</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">مشخصات فنی : </td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;"> کد تامین کننده :</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">نام تامین کننده :</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">مرکز پخش</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">نام مرکز پخش</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">نرخ جذب</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">بهای استاندارد</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">وزن</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">حجم</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">عرض</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">مانده</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">FormulaResult</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">نرخ آخرین خرید</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">نرخ بهای تمام شده</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">نرخ خرید روز</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">نرخ فروش اصلی</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">نرخ مصرف کننده</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">نرخ همکاری</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  font-weight: bold; background-color: #C0C0C0;">نرخ لوله کش</td>
+</tr>
+<tr>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">1</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">True</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">10001</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">پارس پلاست دریچه سیخ زن      160</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">پارس پلاست</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">8 عدد</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">886790</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">886790</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">782000</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">4610000</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">6</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+</tr>
+<tr>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">2</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">True</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">10002</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">پارس پلاست دریچه سیخ زن     63</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">پارس پلاست</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">157 عدد</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">634370</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">412420</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">136000</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">900000</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">124</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+</tr>
+<tr>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">3</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">True</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">10003</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">پارس پلاست کوپلینگ ترمزدار    63</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">پارس پلاست</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">1/650 عدد</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">429000</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">373190</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">75600</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">506000</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">1419</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+</tr>
+<tr>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">3839</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">True</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">13936</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">نیوپایپ"بست کلکتور 1"" کد 15113</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">015113</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">1</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">نیوپایپ</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">184 عدد</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">42500</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">42500</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">42500</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">202730</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">251</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+</tr>
+<tr>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">4754</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">True</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">14867</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">60744</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">1</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">نیوپایپ</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">-( 4 عدد )</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">3949330</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #F5F5F5;">0</td>
+</tr>
+<tr>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">6774</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">True</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">16968</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">ابگرمکن ایران شرق 50 گالن 3 میل</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;"></td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">385000000</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">385000000</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+<td colspan="1" dir="rtl" align="center" style="border-style: solid; border-width: 1px; font-family: 'B Yekan'; font-size: 10px; background-color: #FFFFFF;">0</td>
+</tr>
+</Table>
+</Body>
+</Html>
