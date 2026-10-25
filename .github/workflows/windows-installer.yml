@@ -68,8 +68,6 @@ jobs:
           Start-Process -FilePath $installer -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-" -Wait
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { throw "ISCC.exe missing after install" }
-          # Inno Setup 6.7.3 rejects --version (added in Inno 7). Confirm via
-          # uninstall registry DisplayVersion; SHA-256 of the installer is the pin.
           $displayVersion = (
             Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1" -ErrorAction SilentlyContinue
           ).DisplayVersion
@@ -81,9 +79,6 @@ jobs:
           if ($displayVersion -ne "${{ env.INNO_SETUP_VERSION }}") {
             throw "Inno Setup DisplayVersion mismatch: got '$displayVersion', expected ${{ env.INNO_SETUP_VERSION }}"
           }
-          # Do NOT invoke ISCC -? / --version / /?: Inno Setup 6.7.3 rejects these
-          # and exits 1, which GitHub Actions treats as a failed step even when
-          # stdout is inspected. Presence + SHA-256 + DisplayVersion is the pin.
           Write-Host "ISCC ready: $iscc (DisplayVersion=$displayVersion)"
           echo "ISCC=$iscc" >> $env:GITHUB_ENV
 
@@ -153,29 +148,13 @@ jobs:
           Write-Host "Installer: $($item.FullName)"
           Write-Host "Size bytes: $($item.Length) ($sizeMb MB)"
           Write-Host "SHA256: $sha"
-          @"
-          file=$($item.Name)
-          bytes=$($item.Length)
-          sha256=$sha
-          "@ | Set-Content -Encoding ascii "dist\installer\GheymatYarSetup.exe.sha256.txt"
-          "GheymatYarSetup.exe  $sha" | Set-Content -Encoding ascii "dist\installer\SHA256SUMS"
+          "### GheymatYar Windows Installer" >> $env:GITHUB_STEP_SUMMARY
+          "File: GheymatYarSetup.exe" >> $env:GITHUB_STEP_SUMMARY
+          "Size: $sizeMb MB" >> $env:GITHUB_STEP_SUMMARY
+          "SHA256: ``$sha``" >> $env:GITHUB_STEP_SUMMARY
 
-      - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
+      # Since actions/upload-artifact@v7, a single file can be downloaded
+      # directly from Actions without being wrapped in a ZIP archive.
+      - name: Upload standalone EXE (no ZIP)
+        uses: actions/upload-artifact@v7
         with:
-          name: GheymatYarSetup
-          path: |
-            dist/installer/GheymatYarSetup.exe
-            dist/installer/GheymatYarSetup.exe.sha256.txt
-            dist/installer/SHA256SUMS
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Upload onedir bundle (debug)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: GheymatYar-onedir-debug
-          path: dist/GheymatYar/
-          if-no-files-found: ignore
-          retention-days: 7
