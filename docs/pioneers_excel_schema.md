@@ -11,9 +11,9 @@ The earlier attachment `گزارش لیست کالا - Copy.xls` was an Excel HT
 
 HTML→XLSX conversion preserves cell values, column order, and row order. It does **not** preserve per-cell HTML styles (B Yekan, borders, background), `dir`/`align` attributes, or the HTML wrapper itself.
 
-## Original HTML `.xls` markup (export format)
+## Original HTML `.xls` markup (upload format)
 
-The approved export is written back in this format (`services/pioneers_legacy_xls_writer.py`). Facts from the full 6,774-product original:
+Pioneers' own export, read on upload. Pioneers does **not** import this HTML format back. The approved export is an Excel 97–2003 BIFF8 workbook instead (`services/pioneers_legacy_xls_writer.py`, see below). Facts from the full 6,774-product original:
 
 - UTF-8 with BOM, `\n` line endings (no CR), no HTML entities. Quotes are written raw (`"""1*32"`).
 - `<Html>`, `<Body>`, `<Table>`, then one `<tr>` line, one `<td>` line per cell, and `</tr>`. It ends with `</Table>`, `</Body>`, `</Html>` and a final newline.
@@ -22,6 +22,16 @@ The approved export is written back in this format (`services/pioneers_legacy_xl
 - Some header cells keep surrounding spaces, e.g. `'سایر مشخصات 2 : '` and `' کد تامین کننده :'`.
 
 `pioneers_html_sample.xls` and `pioneers_azin_subset.xls` are normalized copies. They have one space in the header tag, all-white rows, and trimmed header text. Do not use them as the markup reference. `pioneers_real_markup.xls` keeps the original header block and tags, and holds the six products of `pioneers_html_sample.xls`, striped by position.
+
+## Export format: Excel 97–2003 `.xls` (BIFF8)
+
+Pioneers imported its HTML export after Microsoft Excel saved it as "Excel 97–2003 Workbook (*.xls)". GheymatYar writes that format directly with `xlwt`:
+
+- An OLE2 container (signature `D0 CF 11 E0 A1 B1 1A E1`), BIFF8, UTF-16 text (codepage 1200), and one sheet `لیست کالا` (right-to-left).
+- Row 1 holds the 40 header cells as exact text, spacing included. It is followed by the approved product rows only.
+- Cell types follow Excel's conversion where nothing is lost: plain numbers become numbers and `True`/`False` become booleans. Text that Excel would change stays text. That covers leading zeros (`015113`), more than 15 significant digits, trailing decimal zeros, and anything with spaces or letters (`219 عدد`).
+- `نرخ فروش اصلی` (AK) is a number. B Yekan 10pt, a bold grey header, and `#F5F5F5`/`#FFFFFF` row stripes follow the Pioneers look.
+- Before publishing, the file is read back with `xlrd` and every typed cell is compared. `scripts/windows/check_legacy_xls.py` repeats that check independently.
 
 `.gitattributes` marks `fixtures/**` as `-text`. Otherwise a Windows checkout turns these files' LF line endings into CRLF. Also note that `core.autocrlf=input` converts CRLF to LF on commit, so a committed file's line endings do not show what Pioneers wrote.
 

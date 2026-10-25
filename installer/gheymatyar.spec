@@ -71,6 +71,9 @@ hiddenimports = [
     "openpyxl",
     "cryptography",
     "multipart",
+    # Excel 97–2003 (.xls) export writer and its read-back verification.
+    "xlwt",
+    "xlrd",
 ]
 
 # Bundle package data + native libraries for PDF/crypto stacks.

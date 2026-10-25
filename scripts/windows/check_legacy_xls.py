@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
-"""Check a GheymatYar Pioneers ``.xls`` export against its source file.
+"""Check a GheymatYar Excel 97–2003 ``.xls`` export against its source file.
 
-Does not import the application, so it checks the app's writer independently.
+Reads the export with ``xlrd`` only and does not import the application, so
+it checks the app's writer independently.
 
 Asserts:
-  * the export is a UTF-8 (BOM) HTML ``.xls`` with Pioneers' document layout
-    (``<Html>``, ``<Body>``, ``<Table>``, one ``<td>`` per line, ``\\n`` line
-    endings), Pioneers' header tag, and product rows striped by position
-    (``#F5F5F5`` first, then ``#FFFFFF``), as in a full Pioneers export
-  * the header row equals the source header row, in the same column order
+  * the export starts with the OLE2 signature, is not HTML or a zip/.xlsx,
+    and ``xlrd`` reads it as a single-sheet BIFF8 (Excel 97–2003) workbook
+  * the header row is text and equals the source header row, spacing and
+    column order included (all 40 Pioneers columns)
   * the export holds exactly ``--rows`` product rows, all present in the source
-  * the product with ``--code`` has ``نرخ فروش اصلی`` == ``--price``
-  * every other cell of each exported row equals the source row
-  * for an HTML ``.xls`` source, the text of every exported cell line is
-    byte-identical to the source line except the ``نرخ فروش اصلی`` cell
+  * the product with ``--code`` has a numeric ``نرخ فروش اصلی`` == ``--price``
+  * every other cell of each exported row equals the source cell text, and
+    text Excel would alter (e.g. leading-zero ``015113``) is still text
   * the source SHA-256 matches ``--source-sha256`` when given
 """
 
@@ -25,33 +24,16 @@ from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
 from pathlib import Path
 
+import xlrd
+
 SALE_HEADER = "نرخ فروش اصلی"
 CODE_HEADER = "کد کالا"
-BOM = b"\xef\xbb\xbf"
-# Tags of a full Pioneers export. The header has two spaces before font-weight.
-HEADER_TD = (
-    '<td colspan="1" dir="rtl" align="center" style="border-style: solid; '
-    "border-width: 1px; font-family: 'B Yekan'; font-size: 10px;  "
-    'font-weight: bold; background-color: #C0C0C0;">'
-)
-ROW_TDS = tuple(
-    '<td colspan="1" dir="rtl" align="center" style="border-style: solid; '
-    "border-width: 1px; font-family: 'B Yekan'; font-size: 10px; "
-    f'background-color: {color};">'
-    for color in ("#F5F5F5", "#FFFFFF")
-)
-
-
-def _expected_td(row_index: int) -> str:
-    """Tag for block ``row_index`` (0 is the header)."""
-    return HEADER_TD if row_index == 0 else ROW_TDS[(row_index - 1) % 2]
-
-
-def _cell_body(line: str) -> str:
-    return line[line.index(">") + 1 :]
+OLE2 = bytes.fromhex("D0CF11E0A1B11AE1")
 
 
 class _Cells(HTMLParser):
+    """Cell text of a Pioneers HTML-based .xls source."""
+
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.rows: list[list[str]] = []
@@ -73,34 +55,13 @@ class _Cells(HTMLParser):
             self._cell.append(data)
 
 
-def _html_rows(text: str) -> list[list[str]]:
-    parser = _Cells()
-    parser.feed(text)
-    parser.close()
-    return parser.rows
-
-
-def _row_blocks(lines: list[str]) -> list[list[str]]:
-    """Group document lines into ``<tr>`` … ``</tr>`` blocks."""
-    blocks: list[list[str]] = []
-    current: list[str] | None = None
-    for line in lines:
-        if line == "<tr>":
-            current = [line]
-        elif current is not None:
-            current.append(line)
-            if line == "</tr>":
-                blocks.append(current)
-                current = None
-    return blocks
-
-
-def _source_rows(source: Path) -> tuple[list[list[str]], list[list[str]] | None]:
+def _source_rows(source: Path) -> list[list[str]]:
     raw = source.read_bytes()
-    if raw.startswith(BOM) or raw.lstrip()[:6].lower() == b"<html>":
-        # A Windows checkout may hold CRLF; Pioneers itself writes LF.
-        text = raw.decode("utf-8-sig").replace("\r\n", "\n")
-        return _html_rows(text), _row_blocks(text.split("\n"))
+    if raw.startswith(b"\xef\xbb\xbf") or raw.lstrip()[:6].lower() == b"<html>":
+        parser = _Cells()
+        parser.feed(raw.decode("utf-8-sig"))
+        parser.close()
+        return parser.rows
     from openpyxl import load_workbook
 
     workbook = load_workbook(source, read_only=True, data_only=False)
@@ -119,7 +80,23 @@ def _source_rows(source: Path) -> tuple[list[list[str]], list[list[str]] | None]
     finally:
         workbook.close()
     width = max(i + 1 for i, value in enumerate(rows[0]) if value)
-    return [row[:width] + [""] * (width - len(row[:width])) for row in rows], None
+    return [row[:width] + [""] * (width - len(row[:width])) for row in rows]
+
+
+def _cell_text(cell: xlrd.sheet.Cell) -> str:
+    """The text a typed cell stands for, as a Pioneers export spells it."""
+    if cell.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
+        return ""
+    if cell.ctype == xlrd.XL_CELL_TEXT:
+        return cell.value
+    if cell.ctype == xlrd.XL_CELL_BOOLEAN:
+        return "True" if cell.value else "False"
+    if cell.ctype == xlrd.XL_CELL_NUMBER:
+        value = float(cell.value)
+        if value.is_integer():
+            return str(int(value))
+        return format(Decimal(repr(value)), "f")
+    raise SystemExit(f"unexpected cell type {xlrd.sheet.ctype_text.get(cell.ctype)}")
 
 
 def check(
@@ -135,74 +112,67 @@ def check(
         if hashlib.sha256(source.read_bytes()).hexdigest() != source_sha256:
             raise SystemExit("source file changed during export")
     raw = exported.read_bytes()
-    if not raw.startswith(BOM):
-        raise SystemExit("export is not UTF-8 with BOM like a Pioneers .xls")
-    if raw.startswith(BOM + b"PK") or b"\r" in raw:
-        raise SystemExit("export is not a Pioneers HTML .xls (zip or CRLF found)")
-    text = raw.decode("utf-8-sig")
-    lines = text.split("\n")
-    if lines[:3] != ["<Html>", "<Body>", "<Table>"] or lines[-4:] != [
-        "</Table>",
-        "</Body>",
-        "</Html>",
-        "",
-    ]:
-        raise SystemExit("export does not have the Pioneers <Html><Body><Table> layout")
-    blocks = _row_blocks(lines)
-    for index, block in enumerate(blocks):
-        expected_open = _expected_td(index)
-        for line in block[1:-1]:
-            if not (line.startswith(expected_open) and line.endswith("</td>")):
-                raise SystemExit(f"row {index + 1} has a non-Pioneers cell line: {line[:80]!r}")
-    if 3 + sum(len(block) for block in blocks) + 4 != len(lines):
-        raise SystemExit("export has content outside the Pioneers table rows")
+    if raw.startswith(b"PK") or raw.lstrip(b"\xef\xbb\xbf \r\n\t")[:1] == b"<":
+        raise SystemExit("export is a zip/.xlsx or HTML file, not an Excel 97–2003 .xls")
+    if not raw.startswith(OLE2):
+        raise SystemExit("export does not start with the OLE2 signature")
+    try:
+        book = xlrd.open_workbook(file_contents=raw)
+    except xlrd.XLRDError as exc:
+        raise SystemExit(f"xlrd cannot read the export: {exc}") from exc
+    if book.biff_version != 80:
+        raise SystemExit(f"export is BIFF {book.biff_version}, expected BIFF8 (80)")
+    if book.nsheets != 1:
+        raise SystemExit(f"expected one worksheet, found {book.nsheets}")
+    sheet = book.sheet_by_index(0)
 
-    out_rows = _html_rows(text)
-    src_rows, src_blocks = _source_rows(source)
-    if out_rows[0] != src_rows[0]:
+    src_rows = _source_rows(source)
+    header = sheet.row(0)
+    if any(cell.ctype not in (xlrd.XL_CELL_TEXT, xlrd.XL_CELL_EMPTY) for cell in header):
+        raise SystemExit("export header cells must be text")
+    out_header = [_cell_text(cell) for cell in header]
+    if out_header != src_rows[0]:
         raise SystemExit("export header row differs from the source header row")
-    headers = [value.strip() for value in out_rows[0]]
+    headers = [value.strip() for value in out_header]
     sale = headers.index(SALE_HEADER)
     code_index = headers.index(CODE_HEADER)
-    products = out_rows[1:]
-    if len(products) != rows:
-        raise SystemExit(f"expected exactly {rows} product rows, got {len(products)}")
-    by_code = {row[code_index].strip(): (i, row) for i, row in enumerate(src_rows[1:], 1)}
-    for out_index, row in enumerate(products, start=1):
-        if len(row) != len(src_rows[0]):
-            raise SystemExit(f"product row {out_index} has {len(row)} cells")
-        hit = by_code.get(row[code_index].strip())
-        if hit is None:
-            raise SystemExit(f"exported code {row[code_index]!r} is not in the source")
-        src_index, src_row = hit
-        for column, (got, want) in enumerate(zip(row, src_row)):
-            if column != sale and got != want:
+    if sheet.nrows - 1 != rows:
+        raise SystemExit(f"expected exactly {rows} product rows, got {sheet.nrows - 1}")
+
+    by_code = {row[code_index].strip(): row for row in src_rows[1:]}
+    found = None
+    for row_index in range(1, sheet.nrows):
+        cells = sheet.row(row_index)
+        if len(cells) != len(src_rows[0]):
+            raise SystemExit(f"product row {row_index} has {len(cells)} cells")
+        texts = [_cell_text(cell) for cell in cells]
+        src_row = by_code.get(texts[code_index].strip())
+        if src_row is None:
+            raise SystemExit(f"exported code {texts[code_index]!r} is not in the source")
+        for column, (got, want) in enumerate(zip(texts, src_row)):
+            if column == sale:
+                continue
+            if got != want:
                 raise SystemExit(
-                    f"code {row[code_index]}: column {headers[column]!r} changed "
+                    f"code {texts[code_index]}: column {headers[column]!r} changed "
                     f"from {want!r} to {got!r}"
                 )
-        if src_blocks is not None:
-            out_block, src_block = blocks[out_index], src_blocks[src_index]
-            for line_index, (got, want) in enumerate(zip(out_block, src_block)):
-                if line_index in (0, len(out_block) - 1):
-                    if got != want:
-                        raise SystemExit(f"code {row[code_index]}: row markup differs")
-                    continue
-                if line_index != sale + 1 and _cell_body(got) != _cell_body(want):
-                    raise SystemExit(
-                        f"code {row[code_index]}: source line {line_index} is not byte-identical"
-                    )
-    match = [row for row in products if row[code_index].strip() == code.strip()]
-    if len(match) != 1:
-        raise SystemExit(f"expected approved code {code!r} exactly once")
+        if cells[sale].ctype != xlrd.XL_CELL_NUMBER:
+            raise SystemExit(f"code {texts[code_index]}: sale price is not a number")
+        if texts[code_index].strip() == code.strip():
+            if found is not None:
+                raise SystemExit(f"approved code {code!r} appears more than once")
+            found = texts[sale]
+    if found is None:
+        raise SystemExit(f"approved code {code!r} is not in the export")
     try:
-        got = Decimal(match[0][sale].strip())
+        got = Decimal(found)
         want = Decimal(price.replace(",", "").strip())
     except InvalidOperation as exc:
         raise SystemExit("invalid sale price") from exc
-    if got != want or not match[0][sale].strip().isdigit():
-        raise SystemExit(f"sale price mismatch for code {code}: {match[0][sale]!r} != {price!r}")
-    print(f"OK check_legacy_xls: {rows} Pioneers .xls row(s); code {code} == {want}")
+    if got != want:
+        raise SystemExit(f"sale price mismatch for code {code}: {found!r} != {price!r}")
+    print(f"OK check_legacy_xls: BIFF8 .xls with {rows} row(s); code {code} == {want}")
 
 
 def main(argv: list[str] | None = None) -> int:

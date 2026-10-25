@@ -117,7 +117,7 @@ Workflow: [`.github/workflows/windows-installer.yml`](../.github/workflows/windo
 7. Backend `pytest`  
 8. PyInstaller onedir  
 9. `verify_bundle.ps1` — SPA offline assets, AMD64 PE, pdfium, full native import closure (every `.dll`/`.pyd`/`.exe`; VC++ redist DLLs required when imported)  
-10. `smoke_packaged.ps1` — Azin xlsx + HTML `.xls` and Dina metre approval/export (approved products only; default download checked as a Pioneers HTML `.xls` by `check_legacy_xls.py`; `?format=xlsx` compares all retained cells/formulas), genuine blocked-price rejection, mapping save → restart → persist, API shutdown must exit (no silent force-kill success)
+10. `smoke_packaged.ps1` — Azin xlsx + HTML `.xls` and Dina metre approval/export (approved products only; default download checked as an Excel 97–2003 BIFF8 `.xls` (OLE2 signature + `check_legacy_xls.py` via `xlrd`); `?format=xlsx` compares all retained cells/formulas), genuine blocked-price rejection, mapping save → restart → persist, API shutdown must exit (no silent force-kill success)
 11. Compile installer; write size + SHA-256 sidecar files  
 12. Upload artifact **`GheymatYarSetup`** (`GheymatYarSetup.exe` + checksums)
 
@@ -141,7 +141,7 @@ Retain the published `GheymatYarSetup.exe` together with its `sha256` and byte s
 | Source file SHA unchanged | Yes |
 | Export: approved changed rows only; within them only `نرخ فروش اصلی` changes | Yes (`compare_export.py`) |
 | Export contains exactly the approved product code and candidate price (xlsx, xls, Dina) | Yes (`check_export_price.py` + API row counts) |
-| Default download is a Pioneers HTML `.xls`, byte-identical to the source rows except `نرخ فروش اصلی` | Yes (`check_legacy_xls.py`; byte check for `.xls` sources) |
+| Default download is a genuine Excel 97–2003 BIFF8 `.xls` with every field equal to the source except `نرخ فروش اصلی` | Yes (OLE2 signature + `check_legacy_xls.py` via `xlrd`) |
 | Explicit mapping save + EXE restart + same mapping | Yes |
 | Sanitized PATH (no VS redist dirs) | Yes |
 

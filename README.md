@@ -92,7 +92,7 @@ macOS cannot produce the Windows EXE; use the Actions artifact or a Windows buil
 
 ### Supplier support
 
-Only `نرخ فروش اصلی` is written, and only on rows the user has explicitly approved when the new price is numerically different. The output workbook contains those product rows and the required headers, not the rest of the uploaded catalog. That column is always **Rial**; there is no currency or price-basis setting. The only setting is the warning threshold (`suspicious_percent_threshold`). Amounts use `Decimal` — never float. Carton, length, branch, roll, and package quantities are never multiplied into the sale price, and VAT is not invented. A per-metre price is never written onto a branch unit such as `شاخه 6 متری`. Genuine extraction, duplicate-name, identity, and ambiguous-column blockers remain. The default download is Pioneers' own `.xls` format: a UTF-8 HTML table with the same markup, header row, and column order as a Pioneers `گزارش لیست کالا.xls` export, not a renamed `.xlsx`. Each exported row keeps every original field; only `نرخ فروش اصلی` changes. The verified `.xlsx` it is rendered from stays available with `?format=xlsx`. Import into the Pioneers desktop application still has to be checked by hand.
+Only `نرخ فروش اصلی` is written, and only on rows the user has explicitly approved when the new price is numerically different. The output workbook contains those product rows and the required headers, not the rest of the uploaded catalog. That column is always **Rial**; there is no currency or price-basis setting. The only setting is the warning threshold (`suspicious_percent_threshold`). Amounts use `Decimal` — never float. Carton, length, branch, roll, and package quantities are never multiplied into the sale price, and VAT is not invented. A per-metre price is never written onto a branch unit such as `شاخه 6 متری`. Genuine extraction, duplicate-name, identity, and ambiguous-column blockers remain. The default download is a genuine Excel 97–2003 workbook (`.xls`, BIFF8 in an OLE2 container, `application/vnd.ms-excel`), written with `xlwt`. It is not HTML and not a renamed `.xlsx`. Pioneers rejects both of those, but it imported its own export once Excel had saved it in this format. No Excel or Office is needed on the target PC. The sheet keeps all 40 Pioneers columns in their original order, with the exact Persian headers. Each exported row keeps every original field; only `نرخ فروش اصلی` (column AK) changes. Plain numbers are written as numbers and `True`/`False` as booleans, as Excel does. Values Excel would alter, such as barcodes with leading zeros, stay text. The verified `.xlsx` it is rendered from stays available with `?format=xlsx`. Import into the Pioneers desktop application is still the final check.
 
 | Key | List | Price handling |
 |---|---|---|
@@ -134,8 +134,8 @@ See [docs/adding_a_supplier.md](docs/adding_a_supplier.md).
 | `POST` | `/api/sessions/{id}/candidates/{cid}/ignore` | Soft-delete (ignore) a supplier product |
 | `POST` | `/api/sessions/{id}/candidates/{cid}/restore` | Restore an ignored supplier product |
 | `POST` | `/api/sessions/{id}/candidates/{cid}/review` | `INCLUDE` / `EXCLUDE` / `APPROVE` |
-| `POST` | `/api/sessions/{id}/export` | Generate updated Excel (Pioneers `.xls` and `.xlsx`) |
-| `GET` | `/api/sessions/{id}/download` | Download the Pioneers `.xls`; `?format=xlsx` for the `.xlsx` |
+| `POST` | `/api/sessions/{id}/export` | Generate updated Excel (Excel 97–2003 `.xls` and `.xlsx`) |
+| `GET` | `/api/sessions/{id}/download` | Download the Excel 97–2003 `.xls`; `?format=xlsx` for the `.xlsx` |
 
 ## Safety rules
 

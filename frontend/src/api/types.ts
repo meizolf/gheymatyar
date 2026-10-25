@@ -120,7 +120,7 @@ export interface ProductSearchResponse {
 
 export interface ExportResponse {
   session_id: string
-  /** `xls` is Pioneers' own HTML-based .xls (the default download). */
+  /** `xls` is an Excel 97–2003 (BIFF8) workbook, the default download. */
   format: 'xls' | 'xlsx'
   output_filename: string
   updated_count: number

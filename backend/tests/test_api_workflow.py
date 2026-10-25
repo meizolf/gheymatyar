@@ -145,7 +145,7 @@ def test_end_to_end_azin_workflow(
     assert export_resp.json()["format"] == "xls"
     assert export_resp.json()["output_filename"] == "pioneers_azin_subset_updated.xls"
 
-    # Default download: Pioneers' own HTML-based .xls, not a renamed .xlsx.
+    # Default download: an Excel 97–2003 .xls, which Pioneers imports.
     legacy = client.get(f"/api/sessions/{session_id}/download")
     assert legacy.status_code == 200, legacy.text
     assert legacy.headers["content-type"] == "application/vnd.ms-excel"
@@ -155,7 +155,8 @@ def test_end_to_end_azin_workflow(
     assert legacy.headers["x-export-content-sha256"] == hashlib.sha256(
         legacy.content
     ).hexdigest()
-    assert legacy.content.startswith(b"\xef\xbb\xbf<Html>\n<Body>\n<Table>\n")
+    # Genuine Excel 97–2003 (OLE2 / BIFF8), not HTML and not a renamed .xlsx.
+    assert legacy.content.startswith(bytes.fromhex("D0CF11E0A1B11AE1"))
     legacy_path = tmp_path / "export.xls"
     legacy_path.write_bytes(legacy.content)
     subprocess.run([

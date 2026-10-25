@@ -7,7 +7,7 @@
   Starts the windowed EXE with a sanitized PATH (no VS/dev redistributable
   directories), verifies identity via /api/health, runs Excel+PDF workflows for
   both .xlsx and HTML-based .xls fixtures, checks that the default download is
-  Pioneers' own HTML-based .xls with only the approved rows, asserts the
+  a genuine Excel 97–2003 (BIFF8) .xls with only the approved rows, asserts the
   ?format=xlsx export's cell/formula integrity, rejects a genuine supplier
   price blocker, explicitly
   saves a mapping, restarts the EXE,
@@ -265,7 +265,7 @@ function Get-FileSha256([string]$Path) {
     return (Get-FileHash -Algorithm SHA256 -Path $Path).Hash.ToLowerInvariant()
 }
 
-# Default download: Pioneers' own HTML-based .xls with only the approved row.
+# Default download: an Excel 97–2003 (BIFF8) .xls with only the approved row.
 function Test-LegacyXlsExport {
     param(
         [string]$Sid,
@@ -281,13 +281,17 @@ function Test-LegacyXlsExport {
     }
     $outXls = Join-Path $DataDir ("smoke-out-" + $Label + ".xls")
     Invoke-WebRequest -Uri "$Base/api/sessions/$Sid/download" -OutFile $outXls -UseBasicParsing -TimeoutSec 120
+    $head = [System.IO.File]::ReadAllBytes($outXls)[0..7]
+    if ((($head | ForEach-Object { $_.ToString("X2") }) -join "") -ne "D0CF11E0A1B11AE1") {
+        throw "$Label .xls download is not an OLE2 Excel 97–2003 workbook"
+    }
     if ((Get-FileSha256 $outXls) -ne [string]$Export.content_sha256) {
         throw "$Label .xls download does not match the export hash"
     }
     & $PythonExe $LegacyCheckScript --exported $outXls --source $ExcelPath `
         --code $Code --price $Price --rows 1 --source-sha256 $SourceSha
     if ($LASTEXITCODE -ne 0) { throw "Pioneers .xls check failed for $Label" }
-    Write-Host "OK Pioneers .xls download $outXls"
+    Write-Host "OK Excel 97-2003 .xls download $outXls"
 }
 
 function Invoke-Workflow {

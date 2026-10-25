@@ -84,7 +84,7 @@ _EXPORT_ROW_COUNT_KEY = "export_row_count"
 _EXPORT_SHA_KEY = "export_content_sha256"
 _EXPORT_LEGACY_SHA_KEY = "export_legacy_content_sha256"
 
-#: Pioneers' own HTML-based ``.xls``. Pioneers does not import the ``.xlsx``.
+#: Excel 97–2003 (BIFF8) ``.xls``, which Pioneers imports. It rejects ``.xlsx``.
 EXPORT_FORMAT_XLS = "xls"
 #: The verified OpenXML workbook the ``.xls`` is rendered from.
 EXPORT_FORMAT_XLSX = "xlsx"
@@ -1090,7 +1090,7 @@ class ProcessingService:
         if digest != result.content_sha256:
             _invalidate_export(session)
             raise ValueError("exported workbook does not match the recorded content")
-        # Pioneers imports its own HTML-based .xls, rendered from the verified
+        # Pioneers imports an Excel 97–2003 .xls, rendered from the verified
         # workbook so both files carry the same approved rows and prices.
         legacy_output = session.work_dir / "pioneers_updated.xls"
         legacy_output.unlink(missing_ok=True)
