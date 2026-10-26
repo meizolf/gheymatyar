@@ -1,6 +1,7 @@
 import { ApiError } from './errors'
 import type {
   Candidate,
+  CandidateSuggestion,
   CandidatesResponse,
   DetectSupplierResponse,
   ExcelDownload,
@@ -188,6 +189,11 @@ export const api = {
     requestJson<ProductSearchResponse>(
       `/sessions/${encodeURIComponent(sessionId)}/pioneers-products/search?q=${encodeURIComponent(q)}&limit=${limit}` +
         (candidateId ? `&candidate_id=${encodeURIComponent(candidateId)}` : ''),
+    ),
+
+  candidateSuggestions: (sessionId: string, candidateId: string) =>
+    requestJson<{ suggestions: CandidateSuggestion[] }>(
+      `/sessions/${encodeURIComponent(sessionId)}/candidates/${encodeURIComponent(candidateId)}/suggestions`,
     ),
 
   confirmMapping: (

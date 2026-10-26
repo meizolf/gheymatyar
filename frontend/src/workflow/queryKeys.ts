@@ -3,6 +3,8 @@ export const sessionQueryKeys = {
   candidates: (sessionId: string) => ['candidates', sessionId] as const,
   preview: (sessionId: string) => ['preview', sessionId] as const,
   productSearch: (sessionId: string) => ['product-search', sessionId] as const,
+  suggestions: (sessionId: string, candidateId: string) =>
+    ['suggestions', sessionId, candidateId] as const,
   mappings: (supplierKey: string) => ['mappings', supplierKey] as const,
   suppliers: ['suppliers'] as const,
   settings: ['settings'] as const,

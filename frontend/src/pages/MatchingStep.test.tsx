@@ -16,6 +16,7 @@ vi.mock('../api/client', () => ({
     restoreCandidate: vi.fn(),
     getSession: vi.fn(),
     searchProducts: vi.fn(),
+    candidateSuggestions: vi.fn(),
     createSession: vi.fn(),
   },
 }))
@@ -54,6 +55,12 @@ describe('MatchingStep', () => {
     )
     vi.mocked(api.searchProducts).mockResolvedValue({ results: [] })
     vi.mocked(api.getSession).mockResolvedValue(summaryFixture)
+    // By default nothing is held: the dialog shows the row's own suggestions.
+    vi.mocked(api.candidateSuggestions).mockImplementation(async (_sid, candidateId) => ({
+      suggestions:
+        candidatesResponseFixture.candidates.find((c) => c.candidate_id === candidateId)
+          ?.suggestions ?? [],
+    }))
   })
 
   it('shows matched unmatched and ambiguous groups', async () => {
@@ -121,7 +128,14 @@ describe('MatchingStep', () => {
     expect(message).toHaveTextContent('11489')
     expect(message).toHaveTextContent('اذین لوله سه لایه 25')
     expect(message).toHaveTextContent('ابتدا نگاشت قبلی را اصلاح یا حذف کنید')
+    // Shown once, inside the still-open dialog, not on the page behind it.
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText(/قبلاً به کالای «اذین لوله 25»/)).toBe(message)
+    expect(screen.getAllByText(/قبلاً به کالای «اذین لوله 25»/)).toHaveLength(1)
     expect(screen.queryByText(/نگاشت ذخیره شد/)).not.toBeInTheDocument()
+    // Choosing another product clears the stale error.
+    await user.click(within(dialog).getByRole('button', { name: /محصول ج پیشنهادی/ }))
+    expect(screen.queryByText(/قبلاً به کالای «اذین لوله 25»/)).not.toBeInTheDocument()
   })
 
   it('disables search results already held by another supplier product', async () => {
@@ -145,6 +159,29 @@ describe('MatchingStep', () => {
     expect(held).toHaveTextContent('قبلاً به «اذین لوله 25» نگاشت شده است')
     expect(screen.getByRole('button', { name: /11490/ })).toBeEnabled()
     expect(api.searchProducts).toHaveBeenCalledWith('sess-1', 'اذین', 25, 'c3')
+  })
+
+  it('disables dialog suggestions another supplier product already holds', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.candidateSuggestions).mockResolvedValue({
+      suggestions: [
+        { row_number: 20, pioneers_name: 'محصول ج پیشنهادی', pioneers_code: '200', assigned_to: 'اذین لوله سه لایه 40' },
+        { row_number: 21, pioneers_name: 'محصول آزاد', pioneers_code: '201', assigned_to: null },
+      ],
+    })
+    renderMatching()
+    await screen.findByText('محصول ج تأمین')
+    const table = screen.getByRole('table')
+    const unmatchedRow = within(table)
+      .getAllByRole('row')
+      .find((r) => within(r).queryByText('محصول ج تأمین'))!
+    await user.click(within(unmatchedRow).getByRole('button', { name: /تطابق دستی/ }))
+    const dialog = screen.getByRole('dialog')
+    const held = await within(dialog).findByRole('button', { name: /محصول ج پیشنهادی/ })
+    await waitFor(() => expect(held).toBeDisabled())
+    expect(within(dialog).getByText(/قبلاً به «اذین لوله سه لایه 40» نگاشت شده است/)).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: /محصول آزاد/ })).toBeEnabled()
+    expect(api.candidateSuggestions).toHaveBeenCalledWith('sess-1', 'c3')
   })
 
   it('saves manual mapping via API', async () => {

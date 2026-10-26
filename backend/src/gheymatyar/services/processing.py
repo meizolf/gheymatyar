@@ -633,6 +633,31 @@ class ProcessingService:
             for p in products
         ]
 
+    def candidate_suggestions(
+        self, session_id: str, candidate_id: str, db_session: Session
+    ) -> list[dict[str, object]]:
+        """A candidate's suggestions, each with ``assigned_to``.
+
+        ``assigned_to`` names another active supplier product that holds the
+        suggested Pioneers product right now. Saving still re-checks this.
+        """
+        session = self._store.require(session_id)
+        candidate = session.get_candidate(candidate_id)
+        if candidate is None:
+            raise KeyError(candidate_id)
+        held = self._held_targets(session, db_session, candidate_id)
+        annotated: list[dict[str, object]] = []
+        for suggestion in candidate.suggestions:
+            code = suggestion.get("pioneers_code")
+            name = suggestion.get("pioneers_name")
+            target = pioneers_target(
+                code if isinstance(code, str) else None,
+                name if isinstance(name, str) else None,
+            )
+            holder = next((n for other, n in held if other.same_as(target)), None)
+            annotated.append({**suggestion, "assigned_to": holder})
+        return annotated
+
     def _held_targets(
         self,
         session: ProcessingSession,

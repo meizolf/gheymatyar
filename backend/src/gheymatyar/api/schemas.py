@@ -146,6 +146,11 @@ class ProductSearchResponse(BaseModel):
     results: list[dict[str, Any]]
 
 
+class SuggestionsResponse(BaseModel):
+    #: The candidate's suggestions; ``assigned_to`` names another holder.
+    suggestions: list[dict[str, Any]]
+
+
 class ExportResponse(BaseModel):
     session_id: str
     #: ``xls`` (Excel 97–2003 BIFF8 workbook, the default) or ``xlsx``.

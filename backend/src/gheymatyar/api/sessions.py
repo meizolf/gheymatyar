@@ -20,6 +20,7 @@ from gheymatyar.api.schemas import (
     ExportResponse,
     MatchRequest,
     ProductSearchResponse,
+    SuggestionsResponse,
     ReviewDecisionRequest,
     SessionCreateResponse,
     SessionSummaryResponse,
@@ -286,6 +287,24 @@ def price_preview(
         ignored_count=session.ignored_count,
         candidates=[CandidateResponse(**candidate_to_dict(c)) for c in matched],
     )
+
+
+@router.get(
+    "/sessions/{session_id}/candidates/{candidate_id}/suggestions",
+    response_model=SuggestionsResponse,
+)
+def candidate_suggestions(
+    session_id: str,
+    candidate_id: str,
+    service: ProcessingService = Depends(get_processing_service),
+    db: Session = Depends(get_db_session),
+) -> SuggestionsResponse:
+    """Suggestions for manual matching, marking products already held now."""
+    try:
+        suggestions = service.candidate_suggestions(session_id, candidate_id, db)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="session or candidate not found") from exc
+    return SuggestionsResponse(suggestions=suggestions)
 
 
 @router.get(

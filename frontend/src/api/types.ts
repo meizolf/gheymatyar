@@ -69,6 +69,8 @@ export interface CandidateSuggestion {
   pioneers_code?: string | null
   pioneers_name?: string | null
   score?: number
+  /** Another supplier product that holds this product now (dialog only). */
+  assigned_to?: string | null
   [key: string]: unknown
 }
 

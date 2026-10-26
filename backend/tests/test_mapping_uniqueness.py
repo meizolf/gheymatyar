@@ -394,3 +394,43 @@ def test_automatic_matching_keeps_one_holder_per_pioneers_product() -> None:
     assert DUPLICATE_TARGET_WARNING in by_code["S2"].warnings
     assert by_code["S2"].suggestions[0]["held_by"] == ["اذین لوله تک لایه 20"]
     assert (result.matched_count, result.ambiguous_count) == (1, 1)
+
+
+def test_dialog_suggestions_mark_products_held_right_now(
+    client, pioneers_azin_excel: Path, azin_pdf: Path
+) -> None:
+    session_id, candidates = _session(client, pioneers_azin_excel, azin_pdf)
+    holders = {
+        c["row_number"]: c["supplier_name"] for c in candidates if c["status"] == "MATCHED"
+    }
+    row = next(
+        c
+        for c in candidates
+        if c["status"] == "AMBIGUOUS"
+        and any(s["row_number"] in holders for s in c["suggestions"])
+        and any(s["row_number"] not in holders for s in c["suggestions"])
+    )
+
+    def suggestions(candidate_id: str) -> list[dict]:
+        response = client.get(
+            f"/api/sessions/{session_id}/candidates/{candidate_id}/suggestions"
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["suggestions"]
+
+    listed = suggestions(row["candidate_id"])
+    assert [s["row_number"] for s in listed] == [s["row_number"] for s in row["suggestions"]]
+    for suggestion in listed:
+        assert suggestion["assigned_to"] == holders.get(suggestion["row_number"])
+
+    # Held is computed now: once a free suggestion is taken, it is marked too.
+    free = next(s for s in listed if s["assigned_to"] is None)
+    other = next(
+        c for c in _unmatched(candidates, 3) if c["candidate_id"] != row["candidate_id"]
+    )
+    assert _confirm(client, session_id, other, free["row_number"]).status_code == 200
+    again = {s["row_number"]: s["assigned_to"] for s in suggestions(row["candidate_id"])}
+    assert again[free["row_number"]] == other["supplier_name"]
+
+    missing = client.get(f"/api/sessions/{session_id}/candidates/nope/suggestions")
+    assert missing.status_code == 404

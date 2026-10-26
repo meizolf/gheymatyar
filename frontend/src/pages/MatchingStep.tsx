@@ -74,6 +74,17 @@ export function MatchingStep() {
     enabled: Boolean(sessionId),
   })
 
+  // Fetched each time the dialog opens: which products are taken changes as
+  // other rows are mapped. Saving still re-checks on the server.
+  const suggestionsQuery = useQuery({
+    queryKey: sessionQueryKeys.suggestions(sessionId ?? '', editing?.candidate_id ?? ''),
+    queryFn: () => api.candidateSuggestions(sessionId!, editing!.candidate_id),
+    enabled: Boolean(sessionId && editing),
+    staleTime: 0,
+  })
+  const dialogSuggestions =
+    suggestionsQuery.data?.suggestions ?? editing?.suggestions ?? []
+
   const filterPredicate = useCallback(
     (item: Candidate, q: string) =>
       matchesSearch(
@@ -321,7 +332,7 @@ export function MatchingStep() {
       )}
 
       {actionMessage ? <Alert tone="success">{actionMessage}</Alert> : null}
-      {actionError ? <Alert tone="error">{actionError}</Alert> : null}
+      {actionError && !editing ? <Alert tone="error">{actionError}</Alert> : null}
 
       <div className="toolbar">
         <div className="tabs" role="tablist" aria-label="فیلتر وضعیت">
@@ -577,16 +588,17 @@ export function MatchingStep() {
             محصول پایونیرز را جستجو و انتخاب کنید. نگاشت تأییدشده در پایگاه داده
             ذخیره می‌شود.
           </p>
-          {editing.suggestions.length > 0 ? (
+          {dialogSuggestions.length > 0 ? (
             <div className="suggestions">
               <p>
                 <strong>پیشنهادها (نیاز به تأیید دستی):</strong>
               </p>
               <ul className="plain-list">
-                {editing.suggestions.map((s, idx) => {
+                {dialogSuggestions.map((s, idx) => {
                   const row = Number(s.row_number)
                   const name = String(s.pioneers_name ?? s.name ?? '')
                   const code = String(s.pioneers_code ?? s.code ?? '')
+                  const assignedTo = s.assigned_to ? String(s.assigned_to) : null
                   if (!row) return null
                   return (
                     <li key={`${row}-${idx}`}>
@@ -595,16 +607,28 @@ export function MatchingStep() {
                         variant={
                           selectedRow?.rowNumber === row ? 'primary' : 'secondary'
                         }
-                        onClick={() =>
+                        disabled={assignedTo !== null}
+                        title={
+                          assignedTo
+                            ? `قبلاً به «${assignedTo}» نگاشت شده است`
+                            : undefined
+                        }
+                        onClick={() => {
+                          setActionError(null)
                           setSelectedRow({
                             rowNumber: row,
                             label: code ? `${name} (${code})` : name,
                           })
-                        }
+                        }}
                       >
                         {name || `ردیف ${row}`}
                         {code ? ` — ${code}` : ''}
                       </Button>
+                      {assignedTo ? (
+                        <span className="field-hint">
+                          {' '}قبلاً به «{assignedTo}» نگاشت شده است
+                        </span>
+                      ) : null}
                     </li>
                   )
                 })}
@@ -614,15 +638,18 @@ export function MatchingStep() {
           <ProductSearch
             sessionId={sessionId}
             candidateId={editing.candidate_id}
-            onSelect={(rowNumber, label) =>
+            onSelect={(rowNumber, label) => {
+              setActionError(null)
               setSelectedRow({ rowNumber, label })
-            }
+            }}
           />
           {selectedRow ? (
             <Alert tone="info">
               انتخاب‌شده: {selectedRow.label} (ردیف {selectedRow.rowNumber})
             </Alert>
           ) : null}
+          {/* Next to the confirm button, not behind the dialog. */}
+          {actionError ? <Alert tone="error">{actionError}</Alert> : null}
         </Modal>
       ) : null}
     </section>
