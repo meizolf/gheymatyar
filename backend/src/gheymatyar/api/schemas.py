@@ -191,6 +191,9 @@ class MappingResponse(BaseModel):
     mapping_type: str
     created_at: str
     updated_at: str
+    #: Other active supplier products saved to the same Pioneers product.
+    #: Pre-existing duplicates are reported here, never deleted.
+    conflicts_with: list[str] = Field(default_factory=list)
 
 
 class MappingsListResponse(BaseModel):

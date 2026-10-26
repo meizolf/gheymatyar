@@ -34,6 +34,18 @@ from gheymatyar.services.matching import (
     match_supplier_items,
     search_pioneers_products,
 )
+from gheymatyar.services.mapping_uniqueness import (
+    MAPPING_WRITE_LOCK,
+    DuplicateMappingTargetError,
+    active_mappings,
+    candidate_target,
+    mapping_target,
+    merge_holders,
+    pioneers_target,
+    resolve_duplicate_targets,
+    saved_holders,
+    session_holders,
+)
 from gheymatyar.services.name_normalization import normalize_product_name
 from gheymatyar.services.product_identity import supplier_product_identity
 from gheymatyar.services.pioneers_excel_writer import (
@@ -589,19 +601,74 @@ class ProcessingService:
         return session
 
     def search_products(
-        self, session_id: str, query: str, *, limit: int = 25
+        self,
+        session_id: str,
+        query: str,
+        *,
+        limit: int = 25,
+        db_session: Session | None = None,
+        candidate_id: str | None = None,
     ) -> list[dict[str, object]]:
+        """Search Pioneers products. ``assigned_to`` names another holder.
+
+        A product is held when another active supplier product of this
+        supplier is saved or matched to it. Saving still re-checks this.
+        """
         session = self._store.require(session_id)
         products = search_pioneers_products(session.products, query, limit=limit)
+        held = self._held_targets(session, db_session, candidate_id)
+
+        def holder(product) -> str | None:
+            target = pioneers_target(product.code, product.name)
+            return next((name for other, name in held if other.same_as(target)), None)
+
         return [
             {
                 "row_number": p.row_number,
                 "code": p.code,
                 "name": p.name,
                 "sale_price": str(p.sale_price) if p.sale_price is not None else None,
+                "assigned_to": holder(p),
             }
             for p in products
         ]
+
+    def _held_targets(
+        self,
+        session: ProcessingSession,
+        db_session: Session | None,
+        candidate_id: str | None,
+    ) -> list[tuple]:
+        """(target, supplier product name) for every other active holder."""
+        candidate = session.get_candidate(candidate_id) if candidate_id else None
+        held: list[tuple] = []
+        for other in session.candidates:
+            if candidate is not None and other.candidate_id == candidate.candidate_id:
+                continue
+            target = candidate_target(other)
+            if target is not None:
+                held.append((target, other.supplier_name))
+        if db_session is None or not session.supplier_key:
+            return held
+        try:
+            processor = self._registry.get(session.supplier_key)
+        except UnsupportedSupplierError:
+            return held
+        supplier = self._find_supplier_row(db_session, processor)
+        if supplier is None:
+            return held
+        ignored = ProductDecisionRepository(db_session).ignored_identity_keys(supplier.id)
+        own = (
+            set(_candidate_decision_identities(processor, session, candidate))
+            if candidate is not None
+            else set()
+        )
+        for mapping in active_mappings(
+            MappingRepository(db_session).list_for_supplier(supplier.id), ignored
+        ):
+            if mapping.identity_key not in own:
+                held.append((mapping_target(mapping), mapping.supplier_name_raw))
+        return held
 
     def confirm_mapping(
         self,
@@ -683,26 +750,84 @@ class ProcessingService:
                 suspicious_percent_threshold=threshold,
                 conflicted_row_numbers=session.conflicted_row_numbers,
             )[0]
-            if save:
-                supplier_row = self._ensure_supplier_row(db_session, processor)
-                MappingRepository(db_session).upsert(
-                    supplier_id=supplier_row.id,
-                    supplier_name_raw=candidate.supplier_name,
-                    supplier_name_normalized=processor.normalize_supplier_name(
-                        candidate.supplier_name
-                    ),
-                    supplier_code=candidate.supplier_code,
-                    unit=candidate.source_unit,
-                    pioneers_name_raw=product.name,
+            # Check and save under one lock: two requests must not both
+            # claim this Pioneers product. The previous target of this
+            # supplier product is released by the upsert below.
+            with MAPPING_WRITE_LOCK:
+                self._reject_taken_target(
+                    session,
+                    db_session,
+                    processor,
+                    candidate,
                     pioneers_code=product.code,
-                    mapping_type=MappingType.MANUAL,
+                    pioneers_name=product.name,
                 )
-                commit_or_raise(db_session)
+                if save:
+                    supplier_row = self._ensure_supplier_row(db_session, processor)
+                    MappingRepository(db_session).upsert(
+                        supplier_id=supplier_row.id,
+                        supplier_name_raw=candidate.supplier_name,
+                        supplier_name_normalized=processor.normalize_supplier_name(
+                            candidate.supplier_name
+                        ),
+                        supplier_code=candidate.supplier_code,
+                        unit=candidate.source_unit,
+                        pioneers_name_raw=product.name,
+                        pioneers_code=product.code,
+                        mapping_type=MappingType.MANUAL,
+                    )
+                    commit_or_raise(db_session)
             session.replace_candidate(updated)
             self._recount(session)
             self._remember_manual_basis(session, db_session, processor, updated)
             _invalidate_export(session)
             return updated
+
+    def _reject_taken_target(
+        self,
+        session: ProcessingSession,
+        db_session: Session,
+        processor,
+        candidate: UpdateCandidate,
+        *,
+        pioneers_code: str | None,
+        pioneers_name: str,
+    ) -> None:
+        """Raise when another active supplier product holds this Pioneers product.
+
+        Holders are active saved mappings of this supplier (not ignored, not
+        this supplier product) and other matched rows in this session.
+        Reconfirming the same target is not a conflict.
+        """
+        target = pioneers_target(pioneers_code, pioneers_name)
+        saved: list = []
+        supplier = self._find_supplier_row(db_session, processor)
+        if supplier is not None:
+            ignored = ProductDecisionRepository(db_session).ignored_identity_keys(
+                supplier.id
+            )
+            saved = saved_holders(
+                MappingRepository(db_session).list_for_supplier(supplier.id),
+                target=target,
+                ignored_identities=ignored,
+                exclude_identities=_candidate_decision_identities(
+                    processor, session, candidate
+                ),
+            )
+        holders = merge_holders(
+            saved,
+            session_holders(
+                session.candidates,
+                target=target,
+                exclude_candidate_id=candidate.candidate_id,
+            ),
+        )
+        if holders:
+            raise DuplicateMappingTargetError(
+                pioneers_code=pioneers_code,
+                pioneers_name=pioneers_name,
+                holders=holders,
+            )
 
     def ignore_candidate(
         self,
@@ -1334,7 +1459,9 @@ class ProcessingService:
                     }
                 )
             )
-        session.candidates = merged
+        # A kept session choice and a fresh match must not share a product,
+        # e.g. after a restored product rematches by exact name.
+        session.candidates = resolve_duplicate_targets(merged)
         self._recount(session)
 
     @staticmethod

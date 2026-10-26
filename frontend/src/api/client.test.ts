@@ -70,6 +70,27 @@ describe('api client', () => {
     )
   })
 
+  it('keeps the structured body of a 409 duplicate-mapping error', async () => {
+    const detail = {
+      code: 'duplicate_mapping_target',
+      message: 'Pioneers product 11489 is already mapped to supplier product «الف»',
+      pioneers_code: '11489',
+      pioneers_name: 'کالا',
+      conflicts: [{ supplier_name: 'الف' }],
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: false, status: 409, json: async () => ({ detail }) }),
+    )
+    await expect(api.confirmMapping('s1', 'c1', 7, true)).rejects.toSatisfy(
+      (err: unknown) =>
+        err instanceof ApiError &&
+        err.status === 409 &&
+        err.detail === detail.message &&
+        err.data?.pioneers_code === '11489',
+    )
+  })
+
   it('prevents duplicate export by returning a promise the UI awaits', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

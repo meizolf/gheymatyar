@@ -18,20 +18,28 @@ const API_BASE = '/api'
 
 async function parseError(response: Response): Promise<ApiError> {
   let detail = `خطای سرور (${response.status})`
+  let data: Record<string, unknown> | undefined
   try {
     const body: unknown = await response.json()
-    if (
-      typeof body === 'object' &&
-      body !== null &&
-      'detail' in body &&
-      typeof (body as { detail: unknown }).detail === 'string'
+    const raw =
+      typeof body === 'object' && body !== null && 'detail' in body
+        ? (body as { detail: unknown }).detail
+        : undefined
+    if (typeof raw === 'string') {
+      detail = raw
+    } else if (
+      typeof raw === 'object' &&
+      raw !== null &&
+      typeof (raw as { message?: unknown }).message === 'string'
     ) {
-      detail = (body as { detail: string }).detail
+      // Structured errors (e.g. 409 duplicate mapping) carry a message too.
+      data = raw as Record<string, unknown>
+      detail = (raw as { message: string }).message
     }
   } catch {
     /* ignore JSON parse failures */
   }
-  return new ApiError(response.status, detail)
+  return new ApiError(response.status, detail, data)
 }
 
 async function requestJson<T>(
@@ -171,9 +179,15 @@ export const api = {
       `/sessions/${encodeURIComponent(sessionId)}/preview`,
     ),
 
-  searchProducts: (sessionId: string, q: string, limit = 25) =>
+  searchProducts: (
+    sessionId: string,
+    q: string,
+    limit = 25,
+    candidateId?: string,
+  ) =>
     requestJson<ProductSearchResponse>(
-      `/sessions/${encodeURIComponent(sessionId)}/pioneers-products/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+      `/sessions/${encodeURIComponent(sessionId)}/pioneers-products/search?q=${encodeURIComponent(q)}&limit=${limit}` +
+        (candidateId ? `&candidate_id=${encodeURIComponent(candidateId)}` : ''),
     ),
 
   confirmMapping: (

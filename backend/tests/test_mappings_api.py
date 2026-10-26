@@ -45,16 +45,19 @@ def test_mapping_update_and_delete(
             files={"file": ("azin.pdf", handle, "application/pdf")},
         )
     match = client.post(f"/api/sessions/{session_id}/match").json()
+    # A Pioneers product already matched to another supplier product is taken.
+    taken = {c["row_number"] for c in match["candidates"] if c["status"] == "MATCHED"}
     needy = next(
         (
             c
             for c in match["candidates"]
-            if c["status"] in {"UNMATCHED", "AMBIGUOUS"} and c["suggestions"]
+            if c["status"] in {"UNMATCHED", "AMBIGUOUS"}
+            and any(s["row_number"] not in taken for s in c["suggestions"])
         ),
         None,
     )
     if needy is not None:
-        suggestion = needy["suggestions"][0]
+        suggestion = next(s for s in needy["suggestions"] if s["row_number"] not in taken)
         confirm = client.post(
             f"/api/sessions/{session_id}/candidates/{needy['candidate_id']}/confirm-mapping",
             json={"pioneers_row_number": suggestion["row_number"], "save": True},

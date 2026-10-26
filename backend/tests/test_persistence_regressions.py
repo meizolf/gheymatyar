@@ -372,8 +372,14 @@ def test_remap_to_codeless_target_clears_obsolete_code(client, tmp_path: Path) -
     sid = _upload_and_match(client, path, PDF)
     rows = client.get(f"/api/sessions/{sid}/candidates").json()["candidates"]
     candidate = next(row for row in rows if row["supplier_code"] == keep["supplier_code"])
+    taken = {row["row_number"] for row in rows if row["status"] == "MATCHED"}
+    coded_free = next(
+        product.row_number
+        for product in client.app.state.processing.get_session(sid).products
+        if product.code and product.row_number not in taken | {4}
+    )
     response = None
-    for target in (drop["row_number"], 4):
+    for target in (coded_free, 4):
         response = client.post(
             f"/api/sessions/{sid}/candidates/{candidate['candidate_id']}/confirm-mapping",
             json={"pioneers_row_number": target, "save": True},
@@ -674,11 +680,9 @@ def test_restore_preserves_unrelated_exclusion(client, tmp_path: Path) -> None:
 
 def test_session_only_manual_mapping_survives_export(client, tmp_path: Path) -> None:
     sid, keep, drop = setup_rows(client, tmp_path)
-    excluded = client.post(
-        f"/api/sessions/{sid}/candidates/{drop['candidate_id']}/review",
-        json={"decision": "EXCLUDE"},
-    )
-    assert excluded.status_code == 200, excluded.text
+    # drop holds its Pioneers product until it is ignored (deleted) or remapped.
+    released = client.post(f"/api/sessions/{sid}/candidates/{drop['candidate_id']}/ignore")
+    assert released.status_code == 200, released.text
     endpoint = f"/api/sessions/{sid}/candidates/{keep['candidate_id']}"
     mapped = client.post(
         endpoint + "/confirm-mapping",
@@ -795,11 +799,9 @@ def test_unrelated_ignore_keeps_unchanged_session_override(
         for row in rows
         if row["candidate_id"] not in {keep["candidate_id"], drop["candidate_id"]}
     )
+    # drop holds its Pioneers product until it is ignored (deleted) or remapped.
     assert (
-        client.post(
-            f"/api/sessions/{sid}/candidates/{drop['candidate_id']}/review",
-            json={"decision": "EXCLUDE"},
-        ).status_code
+        client.post(f"/api/sessions/{sid}/candidates/{drop['candidate_id']}/ignore").status_code
         == 200
     )
     endpoint = f"/api/sessions/{sid}/candidates/{keep['candidate_id']}"

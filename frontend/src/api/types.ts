@@ -111,6 +111,8 @@ export interface ProductSearchResult {
   row_number: number
   code?: string | null
   name?: string | null
+  /** Another supplier product of this supplier that already holds it. */
+  assigned_to?: string | null
   [key: string]: unknown
 }
 
@@ -153,6 +155,8 @@ export interface Mapping {
   mapping_type: string
   created_at: string
   updated_at: string
+  /** Other saved supplier products on the same Pioneers product. */
+  conflicts_with?: string[]
 }
 
 export interface MappingsListResponse {

@@ -183,18 +183,17 @@ def test_corrected_mapping_persists_and_overrides_exact_name(
         client, pioneers_azin_excel, dina_pdf, tmp_path
     )
     products = client.app.state.processing.get_session(session_id).products
-    third = next(
-        product
-        for product in products
-        if product.row_number not in {keep["row_number"], drop["row_number"]}
-    )
+    rows = client.get(f"/api/sessions/{session_id}/candidates").json()["candidates"]
+    taken = {row["row_number"] for row in rows if row["status"] == "MATCHED"}
+    # Two free Pioneers products: drop still holds its own.
+    second_target, third = [product for product in products if product.row_number not in taken][:2]
     first = client.post(
         f"/api/sessions/{session_id}/candidates/{keep['candidate_id']}/confirm-mapping",
-        json={"pioneers_row_number": drop["row_number"], "save": True},
+        json={"pioneers_row_number": second_target.row_number, "save": True},
     )
     assert first.status_code == 200, first.text
     assert first.json()["match_type"] == "MANUAL"
-    assert first.json()["pioneers_code"] == drop["pioneers_code"]
+    assert first.json()["pioneers_code"] == second_target.code
 
     listed = client.get("/api/suppliers/dina_polymer/mappings").json()["mappings"]
     mine = [row for row in listed if row["supplier_name_raw"] == keep["supplier_name"]]

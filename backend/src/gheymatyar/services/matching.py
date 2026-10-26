@@ -16,6 +16,7 @@ from gheymatyar.services.name_normalization import (
     normalize_product_name,
     tokenize_normalized_name,
 )
+from gheymatyar.services.mapping_uniqueness import resolve_duplicate_targets
 from gheymatyar.services.price_validation import apply_sale_compatibility
 from gheymatyar.services.product_identity import supplier_product_identity
 from gheymatyar.suppliers.base import BaseSupplierProcessor
@@ -606,6 +607,14 @@ def match_supplier_items(
         else:
             result.unmatched_count += 1
 
+    # Two matches must never both claim one Pioneers product.
+    result.candidates = resolve_duplicate_targets(result.candidates)
+    result.matched_count = sum(
+        1 for c in result.candidates if c.status is MatchStatus.MATCHED
+    )
+    result.ambiguous_count = sum(
+        1 for c in result.candidates if c.status is MatchStatus.AMBIGUOUS
+    )
     return result
 
 

@@ -1,9 +1,31 @@
 import { describe, expect, it } from 'vitest'
-import { translateApiDetail } from './apiMessages'
+import { ApiError } from '../api/errors'
+import { describeApiError, translateApiDetail } from './apiMessages'
 
 describe('translateApiDetail', () => {
   it('translates session expiry', () => {
     expect(translateApiDetail('session not found')).toMatch(/منقضی/)
+  })
+
+  it('describes a duplicate-mapping 409 with product and holder', () => {
+    const err = new ApiError(409, 'Pioneers product 11489 is already mapped', {
+      code: 'duplicate_mapping_target',
+      pioneers_code: '11489',
+      pioneers_name: 'اذین لوله سه لایه 25',
+      conflicts: [{ supplier_name: 'الف' }, { supplier_name: 'ب' }],
+    })
+    expect(describeApiError(err, 'x')).toBe(
+      'این کالای پایونیرز (11489 — اذین لوله سه لایه 25) قبلاً به کالای «الف»، «ب» نگاشت شده است. ابتدا نگاشت قبلی را اصلاح یا حذف کنید.',
+    )
+    expect(describeApiError(new Error('boom'), 'fallback')).toBe('fallback')
+  })
+
+  it('translates the duplicate-target row warning', () => {
+    expect(
+      translateApiDetail(
+        'Pioneers product is already matched to another supplier product; change or remove one of the two mappings',
+      ),
+    ).toMatch(/یکی از دو نگاشت را اصلاح یا حذف کنید/)
   })
 
   it('names the approved product that has no product code', () => {

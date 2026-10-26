@@ -17,7 +17,15 @@ from gheymatyar.repositories._session import commit_or_raise
 from gheymatyar.repositories.exceptions import MappingNotFoundError
 from gheymatyar.repositories.mapping_repository import UNSET, MappingRepository
 from gheymatyar.repositories.records import ProductMappingRecord, SupplierRecord
+from gheymatyar.repositories.product_decision_repository import ProductDecisionRepository
 from gheymatyar.repositories.supplier_repository import SupplierRepository
+from gheymatyar.services.mapping_uniqueness import (
+    MAPPING_WRITE_LOCK,
+    DuplicateMappingTargetError,
+    duplicate_saved_targets,
+    pioneers_target,
+    saved_holders,
+)
 from gheymatyar.services.name_normalization import normalize_product_name
 from gheymatyar.suppliers.errors import UnsupportedSupplierError
 from gheymatyar.suppliers.registry import get_default_registry
@@ -42,7 +50,11 @@ def _resolve_supplier_row(db: Session, supplier_key: str) -> SupplierRecord:
     return repo.create(name=processor.display_name, parser_type=supplier_key)
 
 
-def _to_response(record: ProductMappingRecord, supplier_key: str) -> MappingResponse:
+def _to_response(
+    record: ProductMappingRecord,
+    supplier_key: str,
+    conflicts_with: list[str] | None = None,
+) -> MappingResponse:
     return MappingResponse(
         id=record.id,
         supplier_key=supplier_key,
@@ -57,6 +69,7 @@ def _to_response(record: ProductMappingRecord, supplier_key: str) -> MappingResp
         mapping_type=record.mapping_type,
         created_at=record.created_at.isoformat(),
         updated_at=record.updated_at.isoformat(),
+        conflicts_with=conflicts_with or [],
     )
 
 
@@ -70,9 +83,18 @@ def list_mappings(
 ) -> MappingsListResponse:
     supplier = _resolve_supplier_row(db, supplier_key)
     rows = MappingRepository(db).list_for_supplier(supplier.id)
+    ignored = ProductDecisionRepository(db).ignored_identity_keys(supplier.id)
+    duplicates = duplicate_saved_targets(rows, ignored)
     return MappingsListResponse(
         supplier_key=supplier_key,
-        mappings=[_to_response(r, supplier_key) for r in rows],
+        mappings=[
+            _to_response(
+                r,
+                supplier_key,
+                [other.supplier_name_raw for other in duplicates.get(r.id, [])],
+            )
+            for r in rows
+        ],
     )
 
 
@@ -94,16 +116,35 @@ def update_mapping(
     pioneers_code = (
         body.pioneers_code if "pioneers_code" in body.model_fields_set else UNSET
     )
+    target_code = existing.pioneers_code if pioneers_code is UNSET else pioneers_code
     try:
-        updated = repo.update(
-            supplier_id=supplier.id,
-            identity_key=existing.identity_key,
-            pioneers_name_raw=body.pioneers_name_raw,
-            pioneers_code=pioneers_code,
-            pioneers_name_normalized=normalize_product_name(body.pioneers_name_raw),
-            mapping_type=MappingType.MANUAL,
-        )
-        commit_or_raise(db)
+        # Check and save under one lock so two edits cannot claim one product.
+        with MAPPING_WRITE_LOCK:
+            holders = saved_holders(
+                repo.list_for_supplier(supplier.id),
+                target=pioneers_target(target_code, body.pioneers_name_raw),
+                ignored_identities=ProductDecisionRepository(db).ignored_identity_keys(
+                    supplier.id
+                ),
+                exclude_mapping_id=existing.id,
+            )
+            if holders:
+                raise DuplicateMappingTargetError(
+                    pioneers_code=(target_code or "").strip() or None,
+                    pioneers_name=body.pioneers_name_raw,
+                    holders=holders,
+                )
+            updated = repo.update(
+                supplier_id=supplier.id,
+                identity_key=existing.identity_key,
+                pioneers_name_raw=body.pioneers_name_raw,
+                pioneers_code=pioneers_code,
+                pioneers_name_normalized=normalize_product_name(body.pioneers_name_raw),
+                mapping_type=MappingType.MANUAL,
+            )
+            commit_or_raise(db)
+    except DuplicateMappingTargetError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
     except MappingNotFoundError as exc:
         raise HTTPException(status_code=404, detail="mapping not found") from exc
     except ValueError as exc:

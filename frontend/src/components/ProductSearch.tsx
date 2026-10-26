@@ -9,17 +9,20 @@ import { Spinner } from './ui/Spinner'
 
 export function ProductSearch({
   sessionId,
+  candidateId,
   onSelect,
 }: {
   sessionId: string
+  /** The supplier product being mapped; its own target is not "taken". */
+  candidateId?: string
   onSelect: (rowNumber: number, label: string) => void
 }) {
   const [query, setQuery] = useState('')
   const [submitted, setSubmitted] = useState('')
 
   const search = useQuery({
-    queryKey: ['product-search', sessionId, submitted],
-    queryFn: () => api.searchProducts(sessionId, submitted),
+    queryKey: ['product-search', sessionId, submitted, candidateId ?? ''],
+    queryFn: () => api.searchProducts(sessionId, submitted, 25, candidateId),
     enabled: submitted.length >= 1,
     retry: 1,
   })
@@ -74,15 +77,28 @@ export function ProductSearch({
             const name = String(r.name ?? r.pioneers_name ?? '')
             const code = String(r.code ?? r.pioneers_code ?? '')
             const label = code ? `${name} (${code})` : name
+            // Saving re-checks this; the hint only avoids a doomed choice.
+            const assignedTo = r.assigned_to ? String(r.assigned_to) : null
             return (
               <li key={`${r.row_number}-${code}-${name}`}>
                 <button
                   type="button"
+                  disabled={assignedTo !== null}
+                  title={
+                    assignedTo
+                      ? `قبلاً به «${assignedTo}» نگاشت شده است`
+                      : undefined
+                  }
                   onClick={() => onSelect(r.row_number, label)}
                 >
                   <span>{name || '—'}</span>
                   {code ? <span className="ltr meta">{code}</span> : null}
                   <span className="meta">ردیف {r.row_number}</span>
+                  {assignedTo ? (
+                    <span className="meta">
+                      قبلاً به «{assignedTo}» نگاشت شده است
+                    </span>
+                  ) : null}
                 </button>
               </li>
             )

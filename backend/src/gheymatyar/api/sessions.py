@@ -27,6 +27,7 @@ from gheymatyar.api.schemas import (
     UploadPdfResponse,
 )
 from gheymatyar.domain.enums import MatchStatus, ReviewDecision
+from gheymatyar.services.mapping_uniqueness import DuplicateMappingTargetError
 from gheymatyar.services.processing import (
     DEFAULT_EXPORT_FORMAT,
     EXPORT_MEDIA_TYPES,
@@ -295,10 +296,17 @@ def search_products(
     session_id: str,
     q: str = Query(..., min_length=1),
     limit: int = Query(25, ge=1, le=100),
+    candidate_id: str | None = Query(
+        None,
+        description="Mark products held by another supplier product than this one",
+    ),
     service: ProcessingService = Depends(get_processing_service),
+    db: Session = Depends(get_db_session),
 ) -> ProductSearchResponse:
     try:
-        results = service.search_products(session_id, q, limit=limit)
+        results = service.search_products(
+            session_id, q, limit=limit, db_session=db, candidate_id=candidate_id
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
     return ProductSearchResponse(results=results)
@@ -325,6 +333,8 @@ def confirm_mapping(
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session or candidate not found") from exc
+    except DuplicateMappingTargetError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except SQLAlchemyError as exc:
@@ -349,6 +359,8 @@ def ignore_candidate(
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session or candidate not found") from exc
+    except DuplicateMappingTargetError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except SQLAlchemyError as exc:
@@ -373,6 +385,8 @@ def restore_candidate(
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session or candidate not found") from exc
+    except DuplicateMappingTargetError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except SQLAlchemyError as exc:

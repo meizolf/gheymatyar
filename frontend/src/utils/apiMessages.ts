@@ -1,5 +1,7 @@
 /** Translate common backend detail strings into actionable Persian. */
 
+import { isApiError } from '../api/errors'
+
 const PATTERNS: Array<{ re: RegExp; fa: string | ((m: RegExpMatchArray) => string) }> = [
   {
     re: /session not found/i,
@@ -49,6 +51,15 @@ const PATTERNS: Array<{ re: RegExp; fa: string | ((m: RegExpMatchArray) => strin
     re: /Approved product «(.+?)» has no product code/i,
     fa: (m) =>
       `کالای «${m[1]}» در پایونیرز کد کالا ندارد و پایونیرز قیمت را با کد کالا به‌روز می‌کند. کد کالا را در پایونیرز ثبت کنید یا این کالا را از خروجی حذف کنید.`,
+  },
+  {
+    re: /Pioneers product (.+?) is already mapped to supplier product «(.+?)»/i,
+    fa: (m) =>
+      `این کالای پایونیرز (${m[1]}) قبلاً به کالای «${m[2]}» نگاشت شده است. ابتدا نگاشت قبلی را اصلاح یا حذف کنید.`,
+  },
+  {
+    re: /Pioneers product is already matched to another supplier product/i,
+    fa: 'این کالای پایونیرز به کالای دیگری از همین تأمین‌کننده هم نگاشت شده است. یکی از دو نگاشت را اصلاح یا حذف کنید.',
   },
   {
     re: /no approved updates available for export/i,
@@ -284,4 +295,30 @@ export function translateApiDetail(detail: string | null | undefined): string {
     if (m) return typeof fa === 'function' ? fa(m) : fa
   }
   return detail
+}
+
+type DuplicateConflict = { supplier_name?: unknown }
+
+/**
+ * Persian text for an API error. A 409 duplicate-mapping conflict names the
+ * Pioneers product and the supplier product that already holds it.
+ */
+export function describeApiError(error: unknown, fallback: string): string {
+  if (isApiError(error)) {
+    const data = error.data
+    if (data && data.code === 'duplicate_mapping_target') {
+      const code = typeof data.pioneers_code === 'string' ? data.pioneers_code : ''
+      const name = typeof data.pioneers_name === 'string' ? data.pioneers_name : ''
+      const holders = Array.isArray(data.conflicts)
+        ? (data.conflicts as DuplicateConflict[])
+            .map((c) => (typeof c.supplier_name === 'string' ? c.supplier_name : ''))
+            .filter(Boolean)
+        : []
+      const product = [code, name].filter(Boolean).join(' — ')
+      const held = holders.map((h) => `«${h}»`).join('، ')
+      return `این کالای پایونیرز (${product}) قبلاً به کالای ${held} نگاشت شده است. ابتدا نگاشت قبلی را اصلاح یا حذف کنید.`
+    }
+    return translateApiDetail(error.detail)
+  }
+  return fallback
 }

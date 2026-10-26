@@ -94,6 +94,59 @@ describe('MatchingStep', () => {
     ).toBeInTheDocument()
   })
 
+  it('rejects a Pioneers product held by another supplier product (409)', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.confirmMapping).mockRejectedValue(
+      new ApiError(
+        409,
+        'Pioneers product 11489 is already mapped to supplier product «اذین لوله 25»; change or delete that mapping first',
+        {
+          code: 'duplicate_mapping_target',
+          pioneers_code: '11489',
+          pioneers_name: 'اذین لوله سه لایه 25',
+          conflicts: [{ supplier_name: 'اذین لوله 25', source: 'saved_mapping' }],
+        },
+      ),
+    )
+    renderMatching()
+    await screen.findByText('محصول ج تأمین')
+    const table = screen.getByRole('table')
+    const unmatchedRow = within(table)
+      .getAllByRole('row')
+      .find((r) => within(r).queryByText('محصول ج تأمین'))!
+    await user.click(within(unmatchedRow).getByRole('button', { name: /تطابق دستی/ }))
+    await user.click(screen.getByRole('button', { name: /محصول ج پیشنهادی/ }))
+    await user.click(screen.getByRole('button', { name: /تأیید و ذخیره نگاشت/ }))
+    const message = await screen.findByText(/قبلاً به کالای «اذین لوله 25» نگاشت شده است/)
+    expect(message).toHaveTextContent('11489')
+    expect(message).toHaveTextContent('اذین لوله سه لایه 25')
+    expect(message).toHaveTextContent('ابتدا نگاشت قبلی را اصلاح یا حذف کنید')
+    expect(screen.queryByText(/نگاشت ذخیره شد/)).not.toBeInTheDocument()
+  })
+
+  it('disables search results already held by another supplier product', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.searchProducts).mockResolvedValue({
+      results: [
+        { row_number: 7, code: '11489', name: 'اذین لوله سه لایه 25', assigned_to: 'اذین لوله 25' },
+        { row_number: 8, code: '11490', name: 'اذین لوله سه لایه 32', assigned_to: null },
+      ],
+    })
+    renderMatching()
+    await screen.findByText('محصول ج تأمین')
+    const table = screen.getByRole('table')
+    const unmatchedRow = within(table)
+      .getAllByRole('row')
+      .find((r) => within(r).queryByText('محصول ج تأمین'))!
+    await user.click(within(unmatchedRow).getByRole('button', { name: /تطابق دستی/ }))
+    await user.type(screen.getByRole('searchbox', { name: /جستجوی محصول پایونیرز/ }), 'اذین{enter}')
+    const held = await screen.findByRole('button', { name: /11489/ })
+    expect(held).toBeDisabled()
+    expect(held).toHaveTextContent('قبلاً به «اذین لوله 25» نگاشت شده است')
+    expect(screen.getByRole('button', { name: /11490/ })).toBeEnabled()
+    expect(api.searchProducts).toHaveBeenCalledWith('sess-1', 'اذین', 25, 'c3')
+  })
+
   it('saves manual mapping via API', async () => {
     const user = userEvent.setup()
     vi.mocked(api.confirmMapping).mockResolvedValue(

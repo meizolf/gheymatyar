@@ -10,7 +10,7 @@ import { Button } from '../components/ui/Button'
 import { Modal } from '../components/ui/Modal'
 import { Spinner } from '../components/ui/Spinner'
 import { usePagedFilter } from '../hooks/usePagedFilter'
-import { translateApiDetail } from '../utils/apiMessages'
+import { describeApiError, translateApiDetail } from '../utils/apiMessages'
 import {
   MATCH_STATUS_LABEL,
   MATCH_TYPE_LABEL,
@@ -22,8 +22,9 @@ import { useWorkflow } from '../workflow/WorkflowContext'
 
 type StatusFilter = 'ALL' | 'MATCHED' | 'UNMATCHED' | 'AMBIGUOUS' | 'IGNORED'
 
-const SAVED_TARGET_WARNING =
-  /saved Pioneers mapping no longer identifies a single product/i
+// Row warnings shown under the status badge on the matching table.
+const ROW_WARNING =
+  /saved Pioneers mapping no longer identifies a single product|Pioneers product is already matched to another supplier product/i
 
 function statusTone(status: string): 'ok' | 'warn' | 'danger' | 'neutral' {
   if (status === 'MATCHED') return 'ok'
@@ -142,11 +143,8 @@ export function MatchingStep() {
         setActionError(translateApiDetail(err.detail))
         return
       }
-      setActionError(
-        translateApiDetail(
-          isApiError(err) ? err.detail : 'خطا در تأیید نگاشت',
-        ),
-      )
+      // A 409 names the supplier product that already holds this product.
+      setActionError(describeApiError(err, 'خطا در تأیید نگاشت'))
     },
   })
 
@@ -402,7 +400,7 @@ export function MatchingStep() {
                       {MATCH_STATUS_LABEL[c.status] ?? c.status}
                     </Badge>
                     {c.warnings.filter((warning) =>
-                      SAVED_TARGET_WARNING.test(warning),
+                      ROW_WARNING.test(warning),
                     ).map((warning) => (
                       <div key={warning} className="field-hint">
                         {translateApiDetail(warning)}
@@ -615,6 +613,7 @@ export function MatchingStep() {
           ) : null}
           <ProductSearch
             sessionId={sessionId}
+            candidateId={editing.candidate_id}
             onSelect={(rowNumber, label) =>
               setSelectedRow({ rowNumber, label })
             }

@@ -4,10 +4,12 @@ import { api } from '../api/client'
 import { isApiError } from '../api/errors'
 import type { Mapping } from '../api/types'
 import { Alert } from '../components/ui/Alert'
+import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Modal } from '../components/ui/Modal'
 import { Spinner } from '../components/ui/Spinner'
 import { usePagedFilter } from '../hooks/usePagedFilter'
+import { describeApiError } from '../utils/apiMessages'
 import { MATCH_TYPE_LABEL } from '../utils/format'
 
 export function MappingsPage() {
@@ -61,7 +63,8 @@ export function MappingsPage() {
       })
     },
     onError: (err) => {
-      setError(isApiError(err) ? err.detail : 'خطا در به‌روزرسانی')
+      // A 409 names the supplier product that already holds this product.
+      setError(describeApiError(err, 'خطا در به‌روزرسانی'))
     },
   })
 
@@ -150,7 +153,17 @@ export function MappingsPage() {
                   pager.pageItems.map((m) => (
                     <tr key={m.id}>
                       <td>{m.supplier_name_raw}</td>
-                      <td>{m.pioneers_name_raw}</td>
+                      <td>
+                        {m.pioneers_name_raw}
+                        {m.conflicts_with && m.conflicts_with.length > 0 ? (
+                          <div className="field-hint">
+                            <Badge tone="danger">نگاشت تکراری</Badge>{' '}
+                            همین کالای پایونیرز به{' '}
+                            {m.conflicts_with.map((name) => `«${name}»`).join('، ')}{' '}
+                            هم نگاشت شده است. یکی را اصلاح یا حذف کنید.
+                          </div>
+                        ) : null}
+                      </td>
                       <td className="ltr">{m.pioneers_code ?? '—'}</td>
                       <td>
                         {MATCH_TYPE_LABEL[m.mapping_type] ?? m.mapping_type}
@@ -162,6 +175,7 @@ export function MappingsPage() {
                             variant="secondary"
                             onClick={() => {
                               setEditing(m)
+                              setError(null)
                               setEditName(m.pioneers_name_raw)
                               setEditCode(m.pioneers_code ?? '')
                             }}
@@ -238,6 +252,7 @@ export function MappingsPage() {
           <p>
             محصول تأمین‌کننده: <strong>{editing.supplier_name_raw}</strong>
           </p>
+          {error ? <Alert tone="error">{error}</Alert> : null}
           <div className="field">
             <label htmlFor="edit-name">نام پایونیرز</label>
             <input
