@@ -447,11 +447,13 @@ function Invoke-ConfirmedMetreExport {
 
     $query = -join @([char]0x0644, [char]0x0648, [char]0x0644, [char]0x0647)
     $escaped = [uri]::EscapeDataString($query)
-    $search = Invoke-Json -Method GET -Url "$Base/api/sessions/$sid/pioneers-products/search?q=$escaped"
-    if (-not $search.results -or @($search.results).Count -lt 1) {
-        throw "Pioneers search returned no row for the Dina metre export"
+    $search = Invoke-Json -Method GET -Url "$Base/api/sessions/$sid/pioneers-products/search?q=$escaped&candidate_id=$($pipe.candidate_id)"
+    # A Pioneers product already held by another supplier product is rejected (409).
+    $free = @($search.results | Where-Object { -not $_.assigned_to }) | Select-Object -First 1
+    if (-not $free) {
+        throw "Pioneers search returned no free row for the Dina metre export"
     }
-    $rowNumber = [int]$search.results[0].row_number
+    $rowNumber = [int]$free.row_number
     $confirmed = Invoke-Json -Method POST `
         -Url "$Base/api/sessions/$sid/candidates/$($pipe.candidate_id)/confirm-mapping" `
         -Body @{ pioneers_row_number = $rowNumber; save = $true }
@@ -531,11 +533,22 @@ function Invoke-BlockedPriceExport {
         throw "expected Dina 825952020 to have the genuine shared-product pricing blocker"
     }
     $query = [uri]::EscapeDataString((-join @([char]0x0644, [char]0x0648, [char]0x0644, [char]0x0647)))
-    $search = Invoke-Json -Method GET -Url "$Base/api/sessions/$sid/pioneers-products/search?q=$query"
-    if (-not $search.results) { throw "no Pioneers target for blocked-price mapping test" }
+    $search = Invoke-Json -Method GET -Url "$Base/api/sessions/$sid/pioneers-products/search?q=$query&candidate_id=$($blocked.candidate_id)"
+    $taken = @($search.results | Where-Object { $_.assigned_to }) | Select-Object -First 1
+    $free = @($search.results | Where-Object { -not $_.assigned_to }) | Select-Object -First 1
+    if (-not $taken) { throw "expected the Dina metre mapping to hold a searched Pioneers product" }
+    if (-not $free) { throw "no free Pioneers target for blocked-price mapping test" }
+    # The product saved for the Dina metre row cannot get a second supplier product.
+    $duplicate = Invoke-Api -Method POST `
+        -Url "$Base/api/sessions/$sid/candidates/$($blocked.candidate_id)/confirm-mapping" `
+        -Body @{ pioneers_row_number = $taken.row_number; save = $true }
+    if ($duplicate.StatusCode -ne 409 -or $duplicate.Body.detail.code -ne "duplicate_mapping_target") {
+        throw "duplicate mapping expected HTTP 409 duplicate_mapping_target, got $($duplicate.StatusCode): $($duplicate.Text)"
+    }
+    Write-Host "OK duplicate mapping rejected (409) for row $($taken.row_number)"
     $confirmed = Invoke-Json -Method POST `
         -Url "$Base/api/sessions/$sid/candidates/$($blocked.candidate_id)/confirm-mapping" `
-        -Body @{ pioneers_row_number = $search.results[0].row_number; save = $true }
+        -Body @{ pioneers_row_number = $free.row_number; save = $true }
     if ($confirmed.status -ne "MATCHED" -or $confirmed.exportable -or
         -not ($confirmed.pricing_blockers -match "shared by products")) {
         throw "mapping confirmation cleared the genuine supplier price restriction"
