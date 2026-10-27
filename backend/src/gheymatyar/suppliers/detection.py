@@ -305,7 +305,8 @@ class SupplierDetector:
         strong_keys: set[str] = set()
         display_names: dict[str, str] = {}
 
-        for info in self._registry.list_suppliers():
+        # Website suppliers are never read from a PDF.
+        for info in self._registry.pdf_suppliers():
             processor = self._registry.get(info.key)
             rules = processor.detection_rules()
             score, hits, has_strong = _score_rules(text, rules)

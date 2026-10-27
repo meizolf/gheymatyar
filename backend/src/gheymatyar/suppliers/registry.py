@@ -18,6 +18,7 @@ from gheymatyar.suppliers.dina_polymer import DinaPolymerProcessor
 from gheymatyar.suppliers.errors import SupplierPdfError, UnsupportedSupplierError
 from gheymatyar.suppliers.kian import KianProcessor
 from gheymatyar.suppliers.newpipe import NewPipeProcessor
+from gheymatyar.suppliers.pars_plast import ParsPlastWebsiteProcessor
 from gheymatyar.suppliers.top_industrial import TopIndustrialProcessor
 
 __all__ = [
@@ -32,6 +33,8 @@ __all__ = [
 class SupplierInfo:
     key: str
     display_name: str
+    #: ``pdf`` or ``website``.
+    source: str = "pdf"
 
 
 class SupplierProcessorRegistry:
@@ -60,9 +63,13 @@ class SupplierProcessorRegistry:
 
     def list_suppliers(self) -> list[SupplierInfo]:
         return [
-            SupplierInfo(key=p.supplier_key, display_name=p.display_name)
+            SupplierInfo(key=p.supplier_key, display_name=p.display_name, source=p.source_kind)
             for p in sorted(self._processors.values(), key=lambda p: p.supplier_key)
         ]
+
+    def pdf_suppliers(self) -> list[SupplierInfo]:
+        """Suppliers whose prices come from an uploaded PDF."""
+        return [info for info in self.list_suppliers() if info.source == "pdf"]
 
     def keys(self) -> list[str]:
         return sorted(self._processors)
@@ -78,11 +85,16 @@ class SupplierProcessorRegistry:
         different supported supplier.
         """
         processor = self.get(supplier_key)
+        if processor.source_kind != "pdf":
+            raise SupplierPdfError(
+                f"{processor.display_name} prices come from its website, not a PDF; "
+                "use the website fetch instead"
+            )
         text = processor.read_pdf_identity_text(path)
         processor.validate_pdf_identity(path, text=text)
 
         conflicts: list[str] = []
-        for info in self.list_suppliers():
+        for info in self.pdf_suppliers():
             if info.key == processor.supplier_key:
                 continue
             other = self.get(info.key)
@@ -111,5 +123,7 @@ def get_default_registry() -> SupplierProcessorRegistry:
         registry.register(NewPipeProcessor())
         registry.register(AbrahanPipeProcessor())
         registry.register(KianProcessor())
+        # Website-only: its PDFs are scanned images (see pars_plast.py).
+        registry.register(ParsPlastWebsiteProcessor())
         _DEFAULT = registry
     return _DEFAULT

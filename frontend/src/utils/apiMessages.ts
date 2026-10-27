@@ -62,6 +62,10 @@ const PATTERNS: Array<{ re: RegExp; fa: string | ((m: RegExpMatchArray) => strin
     fa: 'این کالای پایونیرز به کالای دیگری از همین تأمین‌کننده هم نگاشت شده است. یکی از دو نگاشت را اصلاح یا حذف کنید.',
   },
   {
+    re: /prices come from its website, not a PDF/i,
+    fa: 'قیمت این تأمین‌کننده از سایت رسمی آن دریافت می‌شود، نه از فایل PDF. از بخش «دریافت قیمت از سایت» استفاده کنید.',
+  },
+  {
     re: /no approved updates available for export/i,
     fa: 'هیچ به‌روزرسانی تأییدشده‌ای برای خروجی وجود ندارد. ابتدا قیمت‌های تغییرکرده را تأیید کنید.',
   },
@@ -299,6 +303,19 @@ export function translateApiDetail(detail: string | null | undefined): string {
 
 type DuplicateConflict = { supplier_name?: unknown }
 
+const WEBSITE_FAILURE: Record<string, string> = {
+  timeout: 'سایت تأمین‌کننده در زمان مقرر پاسخ نداد. اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.',
+  network: 'اتصال به سایت تأمین‌کننده برقرار نشد. اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.',
+  tls: 'اتصال امن به سایت تأمین‌کننده برقرار نشد (گواهی امنیتی نامعتبر). تاریخ و ساعت رایانه را بررسی کنید.',
+  http: 'سایت تأمین‌کننده خطا برگرداند. کمی بعد دوباره تلاش کنید.',
+  too_large: 'پاسخ سایت بزرگ‌تر از حد مجاز بود و پذیرفته نشد.',
+  content_type: 'سایت به‌جای صفحه لیست قیمت، محتوای دیگری برگرداند.',
+  encoding: 'صفحه لیست قیمت سایت قابل خواندن نبود.',
+  not_allowed: 'نشانی سایت مجاز نیست؛ فقط سایت رسمی تأمین‌کننده پذیرفته می‌شود.',
+  structure:
+    'ساختار صفحه لیست قیمت سایت تغییر کرده است. برای جلوگیری از قیمت اشتباه، هیچ قیمتی پذیرفته نشد.',
+}
+
 /**
  * Persian text for an API error. A 409 duplicate-mapping conflict names the
  * Pioneers product and the supplier product that already holds it.
@@ -317,6 +334,13 @@ export function describeApiError(error: unknown, fallback: string): string {
       const product = [code, name].filter(Boolean).join(' — ')
       const held = holders.map((h) => `«${h}»`).join('، ')
       return `این کالای پایونیرز (${product}) قبلاً به کالای ${held} نگاشت شده است. ابتدا نگاشت قبلی را اصلاح یا حذف کنید.`
+    }
+    if (data && data.code === 'website_fetch_failed') {
+      const kind = typeof data.kind === 'string' ? data.kind : ''
+      return (
+        (WEBSITE_FAILURE[kind] ?? 'دریافت قیمت از سایت ناموفق بود.') +
+        ' داده‌های قبلی این جلسه و نگاشت‌های ذخیره‌شده تغییری نکرده‌اند.'
+      )
     }
     return translateApiDetail(error.detail)
   }

@@ -70,7 +70,9 @@ def test_registry_lists_text_suppliers_only() -> None:
         "newpipe",
         "abrahan_pipe",
     } <= keys
-    assert "pars_plast" not in keys
+    # Pars Plast is a website supplier: its PDFs stay unsupported.
+    pdf_keys = {info.key for info in get_default_registry().pdf_suppliers()}
+    assert "pars_plast" in keys and "pars_plast" not in pdf_keys
     assert "kaveh_gostar" not in keys
     assert "polymer_golpayegan" not in keys
 
@@ -82,7 +84,10 @@ def test_api_lists_new_suppliers(client) -> None:
     assert "dina_polymer" in keys
     assert "newpipe" in keys
     assert "abrahan_pipe" in keys
-    assert "pars_plast" not in keys
+    sources = {item["key"]: item["source"] for item in body}
+    # Pars Plast is listed only as a website supplier, never a PDF one.
+    assert sources["pars_plast"] == "website"
+    assert sources["newpipe"] == "pdf"
 
 
 def test_top_extracts_printed_toman_prices(top_result) -> None:

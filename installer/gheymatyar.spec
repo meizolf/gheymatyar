@@ -47,6 +47,8 @@ hiddenimports = [
     "gheymatyar.parsers.workbook_format",
     "gheymatyar.suppliers",
     "gheymatyar.suppliers.azin_pipe",
+    "gheymatyar.suppliers.pars_plast",
+    "gheymatyar.suppliers.website_fetch",
     "gheymatyar.suppliers.registry",
     # Uvicorn internals (dynamically imported)
     "uvicorn.logging",

@@ -24,6 +24,7 @@ from gheymatyar.api.schemas import (
     ReviewDecisionRequest,
     SessionCreateResponse,
     SessionSummaryResponse,
+    WebsiteFetchRequest,
     UploadExcelResponse,
     UploadPdfResponse,
 )
@@ -36,6 +37,8 @@ from gheymatyar.services.processing import (
     candidate_to_dict,
 )
 from gheymatyar.suppliers.errors import SupplierPdfError, UnsupportedSupplierError
+from gheymatyar.suppliers.pars_plast import ParsPlastWebsiteError
+from gheymatyar.suppliers.website_fetch import WebsiteFetchError
 
 router = APIRouter(tags=["sessions"])
 
@@ -187,6 +190,47 @@ async def upload_supplier_pdf(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return UploadPdfResponse(**_summary(service, session_id).model_dump())
+
+
+@router.post(
+    "/sessions/{session_id}/supplier-website",
+    response_model=SessionSummaryResponse,
+)
+def fetch_supplier_website(
+    session_id: str,
+    body: WebsiteFetchRequest,
+    service: ProcessingService = Depends(get_processing_service),
+) -> SessionSummaryResponse:
+    """Fetch a website supplier's price list now, on the user's request.
+
+    Network and page-structure failures return 502 with a ``kind`` so the UI
+    can explain them. The session is unchanged unless the whole list is valid.
+    """
+    try:
+        service.fetch_supplier_website(session_id, supplier_key=body.supplier_key)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="session not found") from exc
+    except WebsiteFetchError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "website_fetch_failed",
+                "kind": exc.kind,
+                "message": f"website price list could not be fetched: {exc}",
+            },
+        ) from exc
+    except ParsPlastWebsiteError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "website_fetch_failed",
+                "kind": "structure",
+                "message": f"website price list was not in the expected format: {exc}",
+            },
+        ) from exc
+    except (UnsupportedSupplierError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _summary(service, session_id)
 
 
 @router.post(

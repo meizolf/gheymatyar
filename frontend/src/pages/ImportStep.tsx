@@ -7,7 +7,7 @@ import { FileDropzone } from '../components/FileDropzone'
 import { Alert } from '../components/ui/Alert'
 import { Button } from '../components/ui/Button'
 import { Spinner } from '../components/ui/Spinner'
-import { translateApiDetail } from '../utils/apiMessages'
+import { describeApiError, translateApiDetail } from '../utils/apiMessages'
 import { isExcelFile, isPdfFile } from '../utils/format'
 import { invalidateSessionData } from '../workflow/queryKeys'
 import { enqueueSessionOp } from '../workflow/sessionQueue'
@@ -45,6 +45,8 @@ export function ImportStep() {
   const [excelError, setExcelError] = useState<string | null>(null)
   const [pdfError, setPdfError] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
+  const [websiteKey, setWebsiteKey] = useState('')
+  const [websiteError, setWebsiteError] = useState<string | null>(null)
 
   const suppliersQuery = useQuery({
     queryKey: ['suppliers'],
@@ -52,6 +54,9 @@ export function ImportStep() {
   })
 
   const busy = exportInFlight || pendingSessionOps > 0
+  const pdfSuppliers = (suppliersQuery.data ?? []).filter((s) => s.source !== 'website')
+  const websiteSuppliers = (suppliersQuery.data ?? []).filter((s) => s.source === 'website')
+  const selectedWebsiteKey = websiteKey || websiteSuppliers[0]?.key || ''
 
   const uploadExcel = useMutation({
     mutationFn: async (file: File) => {
@@ -126,6 +131,36 @@ export function ImportStep() {
           isApiError(err) ? err.detail : 'خطا در شناسایی PDF',
         ),
       )
+    },
+  })
+
+  // Contacts the supplier website only when the user presses the button.
+  const fetchWebsite = useMutation({
+    mutationFn: async (key: string) => {
+      const sid = await ensureSession()
+      return enqueueSessionOp(() => api.fetchSupplierWebsite(sid, key))
+    },
+    onSuccess: async (data) => {
+      setSummary(data)
+      setSupplierConfirmed(Boolean(data.supplier_confirmed))
+      setSupplierKey(data.supplier_key ?? '')
+      setDetection(null)
+      setChangingSupplier(false)
+      setPendingPdf(null)
+      setPdfError(null)
+      setWebsiteError(null)
+      setFormError(null)
+      clearRestoreError()
+      invalidateDownstream()
+      await invalidateSessionData(queryClient, data.session_id, data.supplier_key)
+    },
+    onError: (err) => {
+      if (isApiError(err) && err.sessionExpired) {
+        reset()
+        setFormError(translateApiDetail(err.detail))
+        return
+      }
+      setWebsiteError(describeApiError(err, 'دریافت قیمت از سایت ناموفق بود.'))
     },
   })
 
@@ -276,13 +311,18 @@ export function ImportStep() {
     summary?.pioneers_filename && summary.product_count > 0,
   )
   const pdfUploaded = Boolean(summary?.pdf_filename)
+  const websiteSource = summary?.supplier_source ?? null
+  // Supplier prices are ready from a confirmed PDF or a fetched website list.
   const pdfReady = Boolean(
     supplierConfirmed &&
-      summary?.pdf_filename &&
-      (summary.supplier_item_count ?? 0) > 0,
+      (summary?.pdf_filename || websiteSource) &&
+      (summary?.supplier_item_count ?? 0) > 0,
   )
   const uploading =
-    uploadExcel.isPending || detectPdf.isPending || confirmPdf.isPending
+    uploadExcel.isPending ||
+    detectPdf.isPending ||
+    confirmPdf.isPending ||
+    fetchWebsite.isPending
   const awaitingConfirmation = pdfUploaded && !supplierConfirmed
   // Local file selected but not yet accepted by a successful detect — including
   // a failed replacement over a previously confirmed PDF A.
@@ -380,6 +420,46 @@ export function ImportStep() {
           hint="پس از بارگذاری، شرکت به‌صورت خودکار شناسایی می‌شود و باید تأیید شود."
         />
 
+        {websiteSuppliers.length > 0 ? (
+          <div className="field">
+            <label htmlFor="website-supplier">
+              یا: دریافت قیمت از سایت تأمین‌کننده
+            </label>
+            <div className="search-row">
+              <select
+                id="website-supplier"
+                value={selectedWebsiteKey}
+                disabled={uploading || matchMutation.isPending || busy}
+                onChange={(e) => {
+                  setWebsiteKey(e.target.value)
+                  setWebsiteError(null)
+                }}
+              >
+                {websiteSuppliers.map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.display_name}
+                  </option>
+                ))}
+              </select>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={
+                  !selectedWebsiteKey || uploading || matchMutation.isPending || busy
+                }
+                onClick={() => fetchWebsite.mutate(selectedWebsiteKey)}
+              >
+                {fetchWebsite.isPending ? 'در حال دریافت…' : 'دریافت قیمت از سایت'}
+              </Button>
+            </div>
+            <p className="field-hint">
+              فقط با زدن این دکمه به سایت رسمی تأمین‌کننده وصل می‌شود. سایر
+              تأمین‌کنندگان بدون اینترنت کار می‌کنند.
+            </p>
+            {websiteError ? <Alert tone="error">{websiteError}</Alert> : null}
+          </div>
+        ) : null}
+
         {needsManualSupplier ? (
           <div className="field">
             <label htmlFor="supplier">تأمین‌کننده</label>
@@ -408,7 +488,7 @@ export function ImportStep() {
                 }}
               >
                 <option value="">انتخاب کنید…</option>
-                {(suppliersQuery.data ?? []).map((s) => (
+                {pdfSuppliers.map((s) => (
                   <option key={s.key} value={s.key}>
                     {s.display_name}
                   </option>
@@ -493,7 +573,9 @@ export function ImportStep() {
       {uploading ? (
         <Spinner
           label={
-            detectPdf.isPending
+            fetchWebsite.isPending
+              ? 'در حال دریافت قیمت از سایت تأمین‌کننده…'
+              : detectPdf.isPending
               ? 'در حال شناسایی تأمین‌کننده…'
               : confirmPdf.isPending
                 ? 'در حال استخراج قیمت‌ها…'
@@ -529,7 +611,13 @@ export function ImportStep() {
             ) : null}
             {summary.supplier_item_count > 0 ? (
               <span className="chip">
-                اقلام PDF: <strong>{summary.supplier_item_count}</strong>
+                {websiteSource ? 'اقلام سایت' : 'اقلام PDF'}:{' '}
+                <strong>{summary.supplier_item_count}</strong>
+              </span>
+            ) : null}
+            {websiteSource?.categories[0]?.updated ? (
+              <span className="chip">
+                به‌روزرسانی سایت: <strong>{websiteSource.categories[0].updated}</strong>
               </span>
             ) : null}
             {summary.invalid_row_count > 0 ? (
@@ -538,6 +626,23 @@ export function ImportStep() {
               </span>
             ) : null}
           </div>
+          {websiteSource ? (
+            <Alert tone="success">
+              <p>
+                {websiteSource.item_count} محصول از{' '}
+                {websiteSource.categories.length} دسته سایت رسمی دریافت شد. همین
+                قیمت‌ها تا پایان این جلسه برای تطابق و خروجی استفاده می‌شوند.
+              </p>
+              <ul className="plain-list">
+                {websiteSource.categories.map((c) => (
+                  <li key={c.title}>
+                    {c.title}: {c.items} محصول
+                    {c.excluded > 0 ? ` (${c.excluded} ردیف بدون قیمت کنار گذاشته شد)` : ''}
+                  </li>
+                ))}
+              </ul>
+            </Alert>
+          ) : null}
           {summary.invalid_rows.length > 0 ? (
             <Alert tone="warning">
               <p>ردیف‌های اکسل ردشده:</p>

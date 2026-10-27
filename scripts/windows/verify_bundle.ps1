@@ -177,7 +177,11 @@ foreach ($pattern in $archSamples) {
 $requiredFiles = @(
     @{ Name = "python3*.dll"; Label = "Python runtime DLL" },
     @{ Name = "pdfium.dll"; Label = "PDFium (pdfplumber/pypdfium2)"; Alternate = @("libpdfium.dll") },
-    @{ Name = "vcruntime140.dll"; Label = "VC++ Runtime (vcruntime140)" }
+    @{ Name = "vcruntime140.dll"; Label = "VC++ Runtime (vcruntime140)" },
+    # HTTPS for the optional supplier-website price fetch (Pars Plast).
+    @{ Name = "_ssl.pyd"; Label = "Python SSL module (website fetch)" },
+    @{ Name = "libssl-*.dll"; Label = "OpenSSL libssl (website fetch)" },
+    @{ Name = "libcrypto-*.dll"; Label = "OpenSSL libcrypto (website fetch)" }
 )
 
 foreach ($req in $requiredFiles) {

@@ -36,6 +36,8 @@ class BaseSupplierProcessor(ABC):
     supplier_key: str
     #: Human-readable label for UI dropdowns.
     display_name: str
+    #: ``pdf`` for an uploaded price list, ``website`` for a fetched page.
+    source_kind: str = "pdf"
 
     @abstractmethod
     def parse_pdf(self, path: str | Path) -> SupplierParseResult:

@@ -134,6 +134,16 @@ export const api = {
     )
   },
 
+  fetchSupplierWebsite: (sessionId: string, supplierKey: string) =>
+    requestJson<SessionSummary>(
+      `/sessions/${encodeURIComponent(sessionId)}/supplier-website`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ supplier_key: supplierKey }),
+      },
+    ),
+
   confirmSupplierPdf: (sessionId: string, supplierKey: string) =>
     requestJson<SessionSummary>(
       `/sessions/${encodeURIComponent(sessionId)}/supplier-pdf/confirm`,

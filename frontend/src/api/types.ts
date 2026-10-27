@@ -3,6 +3,26 @@
 export interface SupplierInfo {
   key: string
   display_name: string
+  /** `pdf`: uploaded price list. `website`: fetched on request. */
+  source?: 'pdf' | 'website'
+}
+
+export interface WebsiteCategory {
+  title: string
+  items: number
+  excluded: number
+  updated: string
+}
+
+/** Snapshot of a website price list fetched into this session. */
+export interface WebsiteSource {
+  source: 'website'
+  url: string
+  fetched_at: string | null
+  page_modified: string | null
+  item_count: number
+  excluded_count: number
+  categories: WebsiteCategory[]
 }
 
 export type DetectionConfidence = 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN'
@@ -39,6 +59,7 @@ export interface SessionSummary {
   supplier_display_name: string | null
   supplier_confirmed?: boolean
   detection?: DetectionInfo | null
+  supplier_source?: WebsiteSource | null
   pioneers_filename: string | null
   pdf_filename: string | null
   product_count: number

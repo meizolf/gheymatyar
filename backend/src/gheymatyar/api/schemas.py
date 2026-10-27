@@ -14,6 +14,12 @@ class HealthResponse(BaseModel):
 class SupplierInfoResponse(BaseModel):
     key: str
     display_name: str
+    #: ``pdf`` (uploaded price list) or ``website`` (fetched on request).
+    source: str = "pdf"
+
+
+class WebsiteFetchRequest(BaseModel):
+    supplier_key: str = Field(..., min_length=1)
 
 
 class SessionCreateResponse(BaseModel):
@@ -44,6 +50,8 @@ class SessionSummaryResponse(BaseModel):
     supplier_display_name: str | None = None
     supplier_confirmed: bool = False
     detection: DetectionInfoResponse | None = None
+    #: Website price-list snapshot: URL, fetch time, page date, per-category counts.
+    supplier_source: dict[str, Any] | None = None
     pioneers_filename: str | None = None
     pdf_filename: str | None = None
     product_count: int = 0

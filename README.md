@@ -102,8 +102,9 @@ Only `نرخ فروش اصلی` is written, and only on rows the user has explic
 | `newpipe` | نیوپایپ | Printed Rial, 10% VAT included. Package length is not multiplied. Same name with different prices is blocked. |
 | `abrahan_pipe` | آبراهان | Printed cash Rial. `موجود` rows are skipped. VAT is not stated. |
 | `kian` | کیان | Printed Toman → Rial with a single `× 10`. Package quantity is not multiplied. |
+| `pars_plast` | پارس پلاست | **Website**, not PDF: fetched from the official parsplast.co price list only when the user presses «دریافت قیمت از سایت». All six categories are read. Prices are printed Rial, never ×10 and never × pack quantity. Rows marked «استعلام قیمت» or «به زودی» are excluded. Website codes repeat across products, so each product is identified by its full name (brand, product, family, size) and the code is kept only as reference. The page structure is validated before any price is accepted, and the fetched page is kept as the session snapshot. |
 
-Pars Plast, PG 234 (Polymer Golpayegan), and Kaveh Gostar are **not supported**. Their pages are image-only or the embedded font does not expose the printed prices. Offline Persian OCR is not bundled, and Windows offline OCR has not been verified, so those keys stay unregistered and return HTTP 400.
+PG 234 (Polymer Golpayegan) and Kaveh Gostar are **not supported**, and Pars Plast **PDFs** stay unsupported (its prices come from its website instead). Their pages are image-only or the embedded font does not expose the printed prices. Offline Persian OCR is not bundled, and Windows offline OCR has not been verified, so those keys stay unregistered and return HTTP 400.
 
 Windows onedir packaging and import of the updated workbook into the Pioneers desktop app are not verified from this macOS tree.
 
@@ -126,6 +127,7 @@ See [docs/adding_a_supplier.md](docs/adding_a_supplier.md).
 | `POST` | `/api/sessions/{id}/supplier-pdf/detect` | Upload PDF and detect supplier (no price parse) |
 | `POST` | `/api/sessions/{id}/supplier-pdf/confirm` | Confirm supplier and parse prices |
 | `POST` | `/api/sessions/{id}/supplier-pdf` | Upload/parse with explicit `supplier_key` (API confirmation) |
+| `POST` | `/api/sessions/{id}/supplier-website` | Fetch a website supplier's price list (Pars Plast) on request; 502 with `kind` on network or page-structure failure |
 | `POST` | `/api/sessions/{id}/match` | Run name matching + price preview |
 | `GET` | `/api/sessions/{id}/candidates` | List candidates (`?status=` optional) |
 | `GET` | `/api/sessions/{id}/preview` | Matched price-change preview |

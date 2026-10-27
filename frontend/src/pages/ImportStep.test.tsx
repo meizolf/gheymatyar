@@ -14,6 +14,7 @@ vi.mock('../api/client', () => ({
     detectSupplierPdf: vi.fn(),
     confirmSupplierPdf: vi.fn(),
     uploadSupplierPdf: vi.fn(),
+    fetchSupplierWebsite: vi.fn(),
     runMatch: vi.fn(),
     getSession: vi.fn(),
   },
@@ -538,6 +539,73 @@ describe('ImportStep', () => {
     expect(
       screen.getByRole('button', { name: 'شروع تطابق و ادامه' }),
     ).toBeDisabled()
+  })
+
+  it('fetches a website price list only on request and enables matching', async () => {
+    vi.mocked(api.listSuppliers).mockResolvedValue([
+      { key: 'azin_pipe', display_name: 'آذین لوله', source: 'pdf' },
+      { key: 'pars_plast', display_name: 'پارس پلاست', source: 'website' },
+    ])
+    vi.mocked(api.uploadPioneersExcel).mockResolvedValue(
+      emptySummary({ pioneers_filename: 'ok.xlsx', product_count: 42 }),
+    )
+    vi.mocked(api.fetchSupplierWebsite).mockResolvedValue(
+      emptySummary({
+        pioneers_filename: 'ok.xlsx',
+        product_count: 42,
+        supplier_key: 'pars_plast',
+        supplier_display_name: 'پارس پلاست',
+        supplier_confirmed: true,
+        supplier_item_count: 306,
+        supplier_source: {
+          source: 'website',
+          url: 'https://parsplast.co/',
+          fetched_at: '2026-10-27T14:14:28+00:00',
+          page_modified: '2026-10-26T09:46:59+03:30',
+          item_count: 306,
+          excluded_count: 11,
+          categories: [
+            { title: 'اتصالات پارس فیت', items: 26, excluded: 0, updated: '2 آبان 1405' },
+            { title: 'لوله و اتصالات استخری پارس آپ', items: 57, excluded: 11, updated: '2 آبان 1405' },
+          ],
+        },
+      }),
+    )
+    renderImport()
+    const button = await screen.findByRole('button', { name: 'دریافت قیمت از سایت' })
+    expect(api.fetchSupplierWebsite).not.toHaveBeenCalled()
+    const excelInput = document.querySelectorAll('input[type="file"]')[0] as HTMLInputElement
+    setFileInput(excelInput, new File(['x'], 'ok.xlsx'))
+    await waitFor(() => expect(api.uploadPioneersExcel).toHaveBeenCalled())
+
+    fireEvent.click(button)
+
+    await waitFor(() => {
+      expect(api.fetchSupplierWebsite).toHaveBeenCalledWith('sess-1', 'pars_plast')
+    })
+    expect(await screen.findByText(/306 محصول از 2 دسته سایت رسمی دریافت شد/)).toBeInTheDocument()
+    expect(screen.getByText(/11 ردیف بدون قیمت کنار گذاشته شد/)).toBeInTheDocument()
+    expect(screen.getByText('2 آبان 1405')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'شروع تطابق و ادامه' })).toBeEnabled()
+  })
+
+  it('explains a website failure in Persian and keeps the session', async () => {
+    vi.mocked(api.listSuppliers).mockResolvedValue([
+      { key: 'pars_plast', display_name: 'پارس پلاست', source: 'website' },
+    ])
+    vi.mocked(api.fetchSupplierWebsite).mockRejectedValue(
+      new ApiError(502, 'website price list could not be fetched: timed out', {
+        code: 'website_fetch_failed',
+        kind: 'timeout',
+        message: 'website price list could not be fetched: timed out',
+      }),
+    )
+    renderImport()
+    fireEvent.click(await screen.findByRole('button', { name: 'دریافت قیمت از سایت' }))
+    expect(
+      await screen.findByText(/در زمان مقرر پاسخ نداد.*نگاشت‌های ذخیره‌شده تغییری نکرده‌اند/),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'شروع تطابق و ادامه' })).toBeDisabled()
   })
 
   it('uploads excel after validation', async () => {

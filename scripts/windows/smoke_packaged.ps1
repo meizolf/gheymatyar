@@ -626,6 +626,30 @@ try {
     }
     Write-Host "OK foreign Host rejected on GET /api/settings"
 
+    # Optional Pars Plast website fetch from the packaged EXE. A TLS failure
+    # means HTTPS is broken in the bundle and fails the smoke. Network or site
+    # problems only warn, so a release never depends on parsplast.co.
+    $suppliers = Invoke-Json -Method GET -Url "$Base/api/suppliers"
+    $pars = @($suppliers | Where-Object { $_.key -eq "pars_plast" }) | Select-Object -First 1
+    if (-not $pars -or $pars.source -ne "website") {
+        throw "pars_plast must be listed as a website supplier"
+    }
+    $webSession = (Invoke-Json -Method POST -Url "$Base/api/sessions").session_id
+    $web = Invoke-Api -Method POST -Url "$Base/api/sessions/$webSession/supplier-website" `
+        -Body @{ supplier_key = "pars_plast" }
+    if ($web.StatusCode -eq 200) {
+        if ($web.Body.supplier_item_count -lt 1 -or $web.Body.supplier_source.source -ne "website") {
+            throw "website fetch returned no Pars Plast prices: $($web.Text)"
+        }
+        Write-Host "OK live Pars Plast fetch: $($web.Body.supplier_item_count) products in $(@($web.Body.supplier_source.categories).Count) categories"
+    } elseif ($web.StatusCode -eq 502 -and $web.Body.detail.kind -eq "tls") {
+        throw "website fetch failed TLS inside the packaged EXE: $($web.Text)"
+    } elseif ($web.StatusCode -eq 502) {
+        Write-Host "WARN live Pars Plast fetch unavailable ($($web.Body.detail.kind)); offline workflow unaffected"
+    } else {
+        throw "website fetch expected HTTP 200 or 502, got $($web.StatusCode): $($web.Text)"
+    }
+
     $null = Invoke-Workflow -ExcelPath $ExcelXlsx -Label "xlsx" -SaveMapping
     $null = Invoke-Workflow -ExcelPath $ExcelXls -Label "xls" -HtmlXls
     Invoke-ConfirmedMetreExport -ExcelPath $ExcelXlsx

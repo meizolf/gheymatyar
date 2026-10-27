@@ -331,6 +331,7 @@ def _revoke_supplier_confirmation(session: ProcessingSession) -> None:
     session.supplier_items = []
     session.parse_warnings = []
     session.metadata.pop("supplier_parse", None)
+    session.metadata.pop("supplier_source", None)
     session.metadata.pop("confirmed_supplier_key", None)
     _clear_match_state(session)
     _invalidate_export(session)
@@ -345,10 +346,13 @@ class ProcessingService:
         *,
         registry: SupplierProcessorRegistry | None = None,
         parser: PioneersExcelParser | None = None,
+        website_fetch=None,
     ) -> None:
         self._store = store
         self._registry = registry or get_default_registry()
         self._parser = parser or PioneersExcelParser()
+        # Replaceable in tests so they never touch the network.
+        self._website_fetch = website_fetch
 
     def create_session(self) -> ProcessingSession:
         return self._store.create()
@@ -358,9 +362,55 @@ class ProcessingService:
 
     def list_suppliers(self) -> list[dict[str, str]]:
         return [
-            {"key": info.key, "display_name": info.display_name}
+            {"key": info.key, "display_name": info.display_name, "source": info.source}
             for info in self._registry.list_suppliers()
         ]
+
+    def fetch_supplier_website(
+        self, session_id: str, *, supplier_key: str
+    ) -> ProcessingSession:
+        """Fetch a website supplier's price list into this session.
+
+        Runs only on the user's request. The page is fetched and fully
+        validated before the session changes, so a network failure or an
+        unexpected page leaves the session and SQLite as they were. The
+        fetched HTML is kept in the session folder, and the parsed prices are
+        used for matching and export, so a later change on the website does
+        not alter a session under review.
+        """
+        self._store.require(session_id)
+        processor = self._registry.get(supplier_key)
+        if processor.source_kind != "website":
+            raise ValueError(
+                f"{processor.display_name} prices come from a PDF, not a website"
+            )
+        if self._website_fetch is None:
+            result, page = processor.fetch_price_list()
+        else:
+            result, page = processor.fetch_price_list(fetch=self._website_fetch)
+
+        with self._store.session_lock(session_id):
+            session = self._store.require(session_id)
+            assert session.work_dir is not None
+            snapshot = session.work_dir / "supplier_website.html"
+            snapshot.write_text(page.html, encoding="utf-8")
+            if session.pdf_path is not None:
+                session.pdf_path.unlink(missing_ok=True)
+            session.pdf_path = None
+            session.pdf_filename = None
+            session.supplier_key = processor.supplier_key
+            session.supplier_display_name = processor.display_name
+            session.supplier_confirmed = True
+            session.supplier_items = list(result.items)
+            session.parse_warnings = list(result.warnings)
+            source = {**result.source_metadata, "snapshot": snapshot.name}
+            session.metadata["supplier_parse"] = source
+            session.metadata["supplier_source"] = source
+            session.metadata["confirmed_supplier_key"] = processor.supplier_key
+            session.metadata.pop("detection", None)
+            _clear_match_state(session)
+            _invalidate_export(session)
+            return session
 
     def upload_pioneers_excel(
         self, session_id: str, filename: str, stream: BinaryIO
@@ -542,6 +592,7 @@ class ProcessingService:
             session.metadata["supplier_parse"] = parse_result.source_metadata
             session.metadata["confirmed_supplier_key"] = processor.supplier_key
             session.metadata.pop("detection", None)
+            session.metadata.pop("supplier_source", None)
             _clear_match_state(session)
             _invalidate_export(session)
             return session
@@ -1266,12 +1317,14 @@ class ProcessingService:
         exportable = sum(1 for c in session.candidates if is_exportable(c))
         warned = sum(1 for c in session.candidates if c.warnings)
         detection = session.metadata.get("detection")
+        source = session.metadata.get("supplier_source")
         return {
             "session_id": session.session_id,
             "supplier_key": session.supplier_key,
             "supplier_display_name": session.supplier_display_name,
             "supplier_confirmed": session.supplier_confirmed,
             "detection": detection if isinstance(detection, dict) else None,
+            "supplier_source": source if isinstance(source, dict) else None,
             "pioneers_filename": session.pioneers_filename,
             "pdf_filename": session.pdf_filename,
             "product_count": len(session.products),
