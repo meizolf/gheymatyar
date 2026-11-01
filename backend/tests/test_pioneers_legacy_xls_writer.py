@@ -247,7 +247,7 @@ def _large_html_catalog(path: Path, rows: int) -> None:
 
 
 def _candidate(product, key: str, *, price: int, status=MatchStatus.MATCHED,
-               decision=ReviewDecision.APPROVE) -> UpdateCandidate:
+               decision=ReviewDecision.APPROVE, percent: str = "1") -> UpdateCandidate:
     return UpdateCandidate(
         candidate_id=key,
         row_number=product.row_number,
@@ -258,7 +258,7 @@ def _candidate(product, key: str, *, price: int, status=MatchStatus.MATCHED,
         old_price=product.sale_price,
         new_price=Decimal(price),
         absolute_change=Decimal("1"),
-        percentage_change=Decimal("1"),
+        percentage_change=Decimal(percent),
         match_type=None,
         status=status,
         review_decision=decision,
@@ -407,7 +407,9 @@ def test_only_approved_changed_products_are_downloaded(client) -> None:
         _candidate(p[0], "approved-a", price=1_111_111),
         _candidate(p[1], "excluded", price=2_222_222, decision=ReviewDecision.EXCLUDE),
         _candidate(p[2], "approved-b", price=3_333_333),
-        _candidate(p[3], "include-unapproved", price=4_444_444, decision=ReviewDecision.INCLUDE),
+        # Untouched, but over the threshold: waits for APPROVE.
+        _candidate(p[3], "include-unapproved", price=4_444_444, decision=ReviewDecision.INCLUDE,
+                   percent="80"),
         _candidate(p[4], "ignored", price=5_555_555, status=MatchStatus.IGNORED,
                    decision=ReviewDecision.EXCLUDE),
         _candidate(p[5], "unchanged", price=int(p[5].sale_price)),

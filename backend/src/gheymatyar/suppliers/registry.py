@@ -16,6 +16,11 @@ from gheymatyar.suppliers.detection import (
 )
 from gheymatyar.suppliers.dina_polymer import DinaPolymerProcessor
 from gheymatyar.suppliers.errors import SupplierPdfError, UnsupportedSupplierError
+from gheymatyar.suppliers.galvanized_fittings import (
+    IranianFittingsProcessor,
+    ZacoForeignFittingsProcessor,
+)
+from gheymatyar.suppliers.kaveh_gostar import KavehGostarProcessor
 from gheymatyar.suppliers.kian import KianProcessor
 from gheymatyar.suppliers.newpipe import NewPipeProcessor
 from gheymatyar.suppliers.pars_plast import ParsPlastWebsiteProcessor
@@ -123,6 +128,9 @@ def get_default_registry() -> SupplierProcessorRegistry:
         registry.register(NewPipeProcessor())
         registry.register(AbrahanPipeProcessor())
         registry.register(KianProcessor())
+        registry.register(KavehGostarProcessor())
+        registry.register(IranianFittingsProcessor())
+        registry.register(ZacoForeignFittingsProcessor())
         # Website-only: its PDFs are scanned images (see pars_plast.py).
         registry.register(ParsPlastWebsiteProcessor())
         _DEFAULT = registry

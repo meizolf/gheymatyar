@@ -58,6 +58,7 @@ from gheymatyar.services.price_validation import (
     IDENTITY_CONFLICT_WARNING,
     apply_price_warnings,
     apply_sale_compatibility,
+    approval_state,
     assemble_export_updates,
     is_exportable,
     resolve_suspicious_percent_threshold,
@@ -1610,5 +1611,6 @@ def candidate_to_dict(candidate: UpdateCandidate) -> dict[str, object]:
         "source_unit": candidate.source_unit,
         "suggestions": list(candidate.suggestions),
         "exportable": is_exportable(candidate),
+        "approval": approval_state(candidate),
         "supplier_name_normalized": normalize_product_name(candidate.supplier_name),
     }

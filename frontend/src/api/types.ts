@@ -118,6 +118,8 @@ export interface Candidate {
   source_unit?: string | null
   suggestions: CandidateSuggestion[]
   exportable: boolean
+  /** Backend export state of a matched row (auto = within threshold). */
+  approval?: 'auto' | 'manual' | 'required' | 'blocked' | 'excluded' | 'unchanged' | null
   supplier_name_normalized: string | null
 }
 

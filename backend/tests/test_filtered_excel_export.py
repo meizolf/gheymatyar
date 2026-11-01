@@ -387,7 +387,11 @@ def test_service_exports_only_approved_rows_from_the_large_catalog(
         and product.row_number not in session.duplicate_codes.get(product.code, ())
     ]
     include_a, include_b, unchanged_product = untouched[:3]
+    # Untouched INCLUDE rows: include_a changes 5% (within the threshold, so it
+    # is approved automatically); include_b doubles and still needs APPROVE.
     for index, product in enumerate((include_a, include_b)):
+        old = product.sale_price or Decimal("1000")
+        new = old + Decimal("50") if index == 0 else old * 2
         candidates.append(
             UpdateCandidate(
                 candidate_id=f"include-{index}",
@@ -397,9 +401,9 @@ def test_service_exports_only_approved_rows_from_the_large_catalog(
                 supplier_code=f"INC{index}",
                 supplier_name=product.name or f"include-{index}",
                 old_price=product.sale_price,
-                new_price=(product.sale_price or Decimal("1000")) + Decimal("50"),
-                absolute_change=Decimal("50"),
-                percentage_change=Decimal("5"),
+                new_price=new,
+                absolute_change=new - old,
+                percentage_change=(new - old) / old * Decimal("100"),
                 match_type=None,
                 status=MatchStatus.MATCHED,
                 review_decision=ReviewDecision.INCLUDE,
@@ -474,18 +478,17 @@ def test_service_exports_only_approved_rows_from_the_large_catalog(
     )
     session.candidates = candidates
     result = service.export_excel(session.session_id)
-    assert result.updated_count == 9
-    assert result.exported_row_count == 9
+    assert result.updated_count == 10
+    assert result.exported_row_count == 10
     assert session.output_path is not None
     rows = _product_rows(session.output_path)
-    assert len(rows) == 9
+    assert len(rows) == 10
     codes = {row[3] for row in rows}
-    assert codes == {item["pioneers_code"] for item in selected}
+    assert codes == {item["pioneers_code"] for item in selected} | {include_a.code}
     assert ignored_product.code not in codes
-    assert include_a.code not in codes
     assert include_b.code not in codes
     assert unchanged_product.code not in codes
-    _assert_package_omits(session.output_path, str(include_a.code))
+    _assert_package_omits(session.output_path, str(include_b.code))
     assert _sha256(source) == before
     assert _sha256(FIXTURE) == fixture_hash
 
@@ -545,7 +548,10 @@ def test_service_blocks_conflicting_prices_and_empty_selection(
         service.export_excel(session.session_id)
     assert not (session.work_dir / "pioneers_updated.xlsx").exists()
 
-    session.candidates = [candidate("plain", "2000", ReviewDecision.INCLUDE)]
+    over_threshold = candidate("plain", "2000", ReviewDecision.INCLUDE).model_copy(
+        update={"percentage_change": Decimal("80")}
+    )
+    session.candidates = [over_threshold]
     with pytest.raises(ValueError, match="no approved updates"):
         service.export_excel(session.session_id)
     assert not (session.work_dir / "pioneers_updated.xlsx").exists()

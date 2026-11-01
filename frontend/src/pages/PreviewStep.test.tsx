@@ -123,6 +123,27 @@ describe('PreviewStep', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('shows automatic approval and still lets the user exclude it', async () => {
+    const user = userEvent.setup()
+    const auto = {
+      ...candidatesResponseFixture.candidates[0],
+      review_decision: 'INCLUDE' as const,
+      exportable: true,
+      approval: 'auto' as const,
+      warnings: [],
+    }
+    vi.mocked(api.preview).mockResolvedValue({ ...candidatesResponseFixture, candidates: [auto] })
+    vi.mocked(api.setReview).mockResolvedValue({ ...auto, review_decision: 'EXCLUDE', exportable: false, approval: 'excluded' })
+    renderPreview()
+    const row = (await screen.findAllByRole('row')).find((r) => within(r).queryByText('محصول الف'))!
+    expect(within(row).getByText('تأیید خودکار')).toBeInTheDocument()
+    expect(within(row).queryByRole('button', { name: /تأیید/ })).not.toBeInTheDocument()
+    await user.click(within(row).getByRole('button', { name: 'حذف از خروجی' }))
+    await waitFor(() => {
+      expect(api.setReview).toHaveBeenCalledWith('sess-1', 'c1', 'EXCLUDE')
+    })
+  })
+
   it('approves a normal changed row for export', async () => {
     const user = userEvent.setup()
     vi.mocked(api.setReview).mockResolvedValue({

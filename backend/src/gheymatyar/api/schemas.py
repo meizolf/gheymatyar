@@ -125,6 +125,8 @@ class CandidateResponse(BaseModel):
     source_unit: str | None = None
     suggestions: list[dict[str, Any]] = Field(default_factory=list)
     exportable: bool = False
+    #: auto | manual | required | blocked | excluded | unchanged (matched rows).
+    approval: str | None = None
     supplier_name_normalized: str | None = None
 
 

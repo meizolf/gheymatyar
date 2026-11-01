@@ -15,6 +15,17 @@ DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD = Decimal("30")
 IDENTITY_CONFLICT_WARNING = (
     "duplicate Pioneers product code; cannot export until uniqueness is resolved"
 )
+ZERO_OLD_PRICE_WARNING = "previous sale price was zero; percentage change undefined"
+NON_POSITIVE_PRICE_WARNING = "final sale price must be greater than zero"
+_THRESHOLD_WARNING_PREFIX = "price change "
+
+
+def _is_computed_price_warning(text: str) -> bool:
+    """Warnings rebuilt on every pass, so they never pile up as duplicates."""
+    return (
+        text in {IDENTITY_CONFLICT_WARNING, ZERO_OLD_PRICE_WARNING, NON_POSITIVE_PRICE_WARNING}
+        or (text.startswith(_THRESHOLD_WARNING_PREFIX) and "% threshold" in text)
+    )
 
 
 def parse_suspicious_percent_threshold(raw: str | Decimal | None) -> Decimal:
@@ -63,12 +74,18 @@ def apply_price_warnings(
     suspicious_percent_threshold: Decimal = DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
     conflicted_row_numbers: AbstractSet[int] | None = None,
 ) -> list[UpdateCandidate]:
-    """Return candidates with validation warnings attached (immutable copies)."""
+    """Return candidates with validation warnings attached (immutable copies).
+
+    A change within the threshold gets no warning, so an untouched matched row
+    is approved automatically (see :func:`is_exportable`). A warning only asks
+    for explicit approval: it never turns into an exclusion, which stays the
+    user's own choice.
+    """
     conflicted = conflicted_row_numbers or frozenset()
     enriched: list[UpdateCandidate] = []
     for candidate in candidates:
         warnings = [
-            w for w in candidate.warnings if w != IDENTITY_CONFLICT_WARNING
+            w for w in candidate.warnings if not _is_computed_price_warning(w)
         ]
         for blocker in candidate.pricing_blockers:
             if blocker not in warnings:
@@ -80,14 +97,14 @@ def apply_price_warnings(
         ):
             warnings.append(IDENTITY_CONFLICT_WARNING)
         if candidate.new_price is not None and candidate.new_price <= 0:
-            warnings.append("final sale price must be greater than zero")
+            warnings.append(NON_POSITIVE_PRICE_WARNING)
         if (
             candidate.status == MatchStatus.MATCHED
             and candidate.percentage_change is not None
             and abs(candidate.percentage_change) > suspicious_percent_threshold
         ):
             warnings.append(
-                f"price change {candidate.percentage_change:.2f}% exceeds "
+                f"{_THRESHOLD_WARNING_PREFIX}{candidate.percentage_change:.2f}% exceeds "
                 f"{suspicious_percent_threshold}% threshold"
             )
         if (
@@ -96,23 +113,10 @@ def apply_price_warnings(
             and candidate.new_price is not None
             and candidate.new_price > 0
         ):
-            warnings.append("previous sale price was zero; percentage change undefined")
+            warnings.append(ZERO_OLD_PRICE_WARNING)
 
-        # Suspicious matched rows default to EXCLUDE until explicitly approved.
-        # Identity conflicts stay non-exportable even if APPROVE is attempted later.
-        decision = candidate.review_decision
-        if (
-            candidate.status == MatchStatus.MATCHED
-            and warnings
-            and decision == ReviewDecision.INCLUDE
-        ):
-            decision = ReviewDecision.EXCLUDE
-
-        enriched.append(
-            candidate.model_copy(
-                update={"warnings": warnings, "review_decision": decision}
-            )
-        )
+        unique = list(dict.fromkeys(warnings))
+        enriched.append(candidate.model_copy(update={"warnings": unique}))
     return enriched
 
 
@@ -272,13 +276,37 @@ def _price_is_changed(candidate: UpdateCandidate) -> bool:
     return candidate.old_price != candidate.new_price
 
 
+def is_automatically_approved(candidate: UpdateCandidate) -> bool:
+    """A safe change the user has not touched: exported without a click.
+
+    The row is a resolved match with a positive previous price, a valid new
+    price, a change within the warning threshold (so no warning at all), and
+    no blocker. Anything that needs review keeps ``INCLUDE`` but is not
+    exported until the user chooses ``APPROVE``.
+    """
+    return (
+        candidate.review_decision == ReviewDecision.INCLUDE
+        and candidate.status == MatchStatus.MATCHED
+        and candidate.old_price is not None
+        and candidate.old_price > 0
+        and not candidate.warnings
+        and not candidate.pricing_blockers
+    )
+
+
 def is_exportable(candidate: UpdateCandidate) -> bool:
     """Whether a candidate may be written into the output Excel.
 
-    Inclusion is the default review state and is not approval. Export requires
-    an explicit ``APPROVE`` decision and a numerically different price.
+    ``APPROVE`` is a manual approval. An untouched ``INCLUDE`` row is approved
+    automatically only when :func:`is_automatically_approved` holds. Either
+    way the price must have changed, and blockers and duplicate Pioneers codes
+    stay blocked; ``EXCLUDE`` and ignored rows are never exported.
     """
-    if candidate.review_decision != ReviewDecision.APPROVE:
+    if candidate.review_decision == ReviewDecision.EXCLUDE:
+        return False
+    if candidate.review_decision != ReviewDecision.APPROVE and not (
+        is_automatically_approved(candidate)
+    ):
         return False
     if candidate.status != MatchStatus.MATCHED:
         return False
@@ -293,6 +321,26 @@ def is_exportable(candidate: UpdateCandidate) -> bool:
     if IDENTITY_CONFLICT_WARNING in candidate.warnings:
         return False
     return True
+
+
+def approval_state(candidate: UpdateCandidate) -> str | None:
+    """How a matched row stands for export, for display.
+
+    ``auto`` / ``manual`` are exported; ``required`` waits for APPROVE;
+    ``blocked`` cannot be approved; ``excluded`` was removed by the user;
+    ``unchanged`` has the same price. None for rows that are not matched.
+    """
+    if candidate.status != MatchStatus.MATCHED:
+        return None
+    if candidate.review_decision == ReviewDecision.EXCLUDE:
+        return "excluded"
+    if candidate.pricing_blockers or IDENTITY_CONFLICT_WARNING in candidate.warnings:
+        return "blocked"
+    if not _price_is_changed(candidate):
+        return "unchanged"
+    if is_exportable(candidate):
+        return "manual" if candidate.review_decision == ReviewDecision.APPROVE else "auto"
+    return "blocked" if candidate.new_price is None or candidate.new_price <= 0 else "required"
 
 
 def to_final_sale_updates(

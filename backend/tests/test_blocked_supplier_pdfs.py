@@ -50,8 +50,12 @@ def test_pars_plast_pdf_upload_is_refused(client, pars_plast_pdf: Path) -> None:
 
 
 def test_kaveh_gostar_has_no_text_layer(kaveh_pdf: Path) -> None:
+    """The scanned 1405/06 list stays unusable; its text-layer list is supported."""
     assert _text_length(kaveh_pdf) == 0
-    assert "kaveh_gostar" not in get_default_registry().keys()
+    registry = get_default_registry()
+    with pytest.raises(SupplierPdfError):
+        registry.validate_pdf_for_supplier(kaveh_pdf, "kaveh_gostar")
+    assert registry.detect(kaveh_pdf).detected_supplier_id is None
 
 
 def test_pg234_text_layer_does_not_contain_printed_prices(pg234_pdf: Path) -> None:

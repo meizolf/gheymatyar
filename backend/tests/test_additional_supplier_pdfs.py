@@ -73,7 +73,8 @@ def test_registry_lists_text_suppliers_only() -> None:
     # Pars Plast is a website supplier: its PDFs stay unsupported.
     pdf_keys = {info.key for info in get_default_registry().pdf_suppliers()}
     assert "pars_plast" in keys and "pars_plast" not in pdf_keys
-    assert "kaveh_gostar" not in keys
+    # Kaveh Gostar is supported from its text-layer list (test_new_fitting_suppliers).
+    assert "kaveh_gostar" in keys
     assert "polymer_golpayegan" not in keys
 
 

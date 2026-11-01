@@ -38,6 +38,16 @@ const TAX_LABEL: Record<string, string> = {
   not_stated: 'مالیات در سند نیامده',
 }
 
+// Shown for the backend's approval state; the server decides export.
+const APPROVAL_BADGE: Record<string, { label: string; tone: 'ok' | 'warn' | 'danger' | 'neutral' }> = {
+  auto: { label: 'تأیید خودکار', tone: 'ok' },
+  manual: { label: 'تأیید دستی', tone: 'ok' },
+  required: { label: 'نیاز به تأیید', tone: 'warn' },
+  blocked: { label: 'مسدود', tone: 'danger' },
+  excluded: { label: 'حذف از خروجی', tone: 'neutral' },
+  unchanged: { label: 'بدون تغییر', tone: 'neutral' },
+}
+
 function isHardBlocked(candidate: Candidate): boolean {
   return (candidate.pricing_blockers?.length ?? 0) > 0
 }
@@ -224,6 +234,8 @@ export function PreviewStep() {
     summaryQuery.data?.exportable_count ??
     candidates.filter((c) => c.exportable).length
   const warningCount = candidates.filter((c) => c.warnings.length > 0).length
+  const autoCount = candidates.filter((c) => c.approval === 'auto').length
+  const requiredCount = candidates.filter((c) => c.approval === 'required').length
   const excludedCount = candidates.filter(
     (c) => c.review_decision === 'EXCLUDE',
   ).length
@@ -252,6 +264,12 @@ export function PreviewStep() {
         </span>
         <span className="chip">
           تأییدشده برای خروجی: <strong>{exportableCount}</strong>
+        </span>
+        <span className="chip" title="تغییر قیمت در حد آستانه هشدار؛ بدون نیاز به تأیید">
+          تأیید خودکار: <strong>{autoCount}</strong>
+        </span>
+        <span className="chip" title="تغییر بیش از آستانه یا قیمت قبلی صفر">
+          نیاز به تأیید: <strong>{requiredCount}</strong>
         </span>
         <span className="chip" title="ردیف‌هایی با قیمت متفاوت (حتی اگر حذف‌شده)">
           اختلاف قیمت: <strong>{changedDetected}</strong>
@@ -330,16 +348,16 @@ export function PreviewStep() {
               </tr>
             ) : (
               pager.pageItems.map((c) => {
-                const blocked = isHardBlocked(c)
+                const blocked = c.approval ? c.approval === 'blocked' : isHardBlocked(c)
                 const softWarnings = approvableWarnings(c)
                 const excluded = c.review_decision === 'EXCLUDE'
                 const priceChanged = isPriceChanged(c)
                 const approved = c.review_decision === 'APPROVE'
-                const needsApprove =
-                  !blocked &&
-                  !excluded &&
-                  priceChanged &&
-                  !approved
+                // Within the threshold the backend approves automatically.
+                const needsApprove = c.approval
+                  ? c.approval === 'required'
+                  : !blocked && !excluded && priceChanged && !approved
+                const badge = c.approval ? APPROVAL_BADGE[c.approval] : undefined
                 const provenance = provenanceText(c)
                 return (
                   <tr
@@ -372,7 +390,9 @@ export function PreviewStep() {
                     <td>
                       <Badge
                         tone={
-                          blocked
+                          badge
+                            ? badge.tone
+                            : blocked
                             ? 'danger'
                             : c.exportable
                               ? 'ok'
@@ -383,7 +403,9 @@ export function PreviewStep() {
                                   : 'danger'
                         }
                       >
-                        {blocked
+                        {badge
+                          ? badge.label
+                          : blocked
                           ? 'مسدود'
                           : c.exportable
                             ? 'تأییدشده'
