@@ -19,6 +19,9 @@ from gheymatyar.suppliers.pars_plast import (
     ALLOWED_HOSTS,
     WEBSITE_URL,
     ParsPlastWebsiteError,
+    ParsPlastWebsiteProcessor,
+    cache_busting_url,
+    iran_date_stamp,
     parse_price_list_html,
     product_name,
     size_phrase,
@@ -265,6 +268,42 @@ def test_only_the_official_host_over_https_is_allowed() -> None:
     assert ssl.create_default_context().verify_mode == ssl.CERT_REQUIRED
 
 
+def test_cache_busting_date_is_today_in_iran() -> None:
+    from datetime import datetime, timezone
+
+    # 20:30 UTC is midnight in Tehran (UTC+03:30): the Iranian date turns over.
+    assert iran_date_stamp(datetime(2026, 10, 31, 20, 29, tzinfo=timezone.utc)) == "20261031"
+    assert iran_date_stamp(datetime(2026, 10, 31, 20, 30, tzinfo=timezone.utc)) == "20261101"
+    assert iran_date_stamp(datetime(2026, 11, 1, 21, 0, tzinfo=timezone.utc)) == "20261102"
+
+
+def test_cache_busting_url_keeps_other_params_and_one_test() -> None:
+    from datetime import datetime, timezone
+
+    now = datetime(2026, 11, 1, 8, 0, tzinfo=timezone.utc)
+    assert cache_busting_url(WEBSITE_URL, now=now) == WEBSITE_URL + "?test=20261101"
+    stale = WEBSITE_URL + "?lang=fa&test=20261031&test=old#price-category-8"
+    assert cache_busting_url(stale, now=now) == (
+        WEBSITE_URL + "?lang=fa&test=20261101#price-category-8"
+    )
+
+
+def test_fetch_requests_the_dated_url() -> None:
+    from datetime import datetime, timezone
+
+    requested: list[str] = []
+
+    def fake_fetch(url, *, allowed_hosts):
+        requested.append(url)
+        return _page()
+
+    now = datetime(2026, 11, 2, 6, 0, tzinfo=timezone.utc)
+    result, _ = ParsPlastWebsiteProcessor().fetch_price_list(fetch=fake_fetch, now=now)
+    assert requested == [WEBSITE_URL + "?test=20261102"]
+    check_allowed_url(requested[0], ALLOWED_HOSTS)
+    assert len(result.items) == 306
+
+
 def _page(html: str = HTML) -> FetchedPage:
     return FetchedPage(
         url=WEBSITE_URL, final_url=WEBSITE_URL, html=html,
@@ -278,7 +317,7 @@ def website(client):
     pages: list[object] = []
 
     def fake_fetch(url, *, allowed_hosts):
-        assert url == WEBSITE_URL and allowed_hosts == ALLOWED_HOSTS
+        assert url == cache_busting_url(WEBSITE_URL) and allowed_hosts == ALLOWED_HOSTS
         outcome = pages.pop(0)
         if isinstance(outcome, BaseException):
             raise outcome

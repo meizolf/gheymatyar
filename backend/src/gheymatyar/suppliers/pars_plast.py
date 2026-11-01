@@ -32,10 +32,12 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from gheymatyar.domain.sale_policy import PIONEERS_SALE_CURRENCY
 from gheymatyar.domain.supplier_item import SupplierPriceItem
@@ -52,6 +54,12 @@ WEBSITE_URL = (
     "%D9%BE%D8%A7%D8%B1%D8%B3-%D9%BE%D9%84%D8%A7%D8%B3%D8%AA/"
 )
 ALLOWED_HOSTS = frozenset({"parsplast.co", "www.parsplast.co"})
+#: Iran has kept UTC+03:30 with no daylight saving since 2022. A fixed
+#: offset avoids zoneinfo, which needs the tzdata package on Windows.
+IRAN_TIME = timezone(timedelta(hours=3, minutes=30), "Asia/Tehran")
+#: The plain page URL can return a stale cached price list; a fresh
+#: ``test=YYYYMMDD`` each day returns current prices.
+CACHE_BUSTING_PARAM = "test"
 EXPECTED_HEADERS = (
     "ردیف",
     "کد محصول",
@@ -77,6 +85,24 @@ CROSS_FAMILY_PRICE_BLOCKER = (
     "website lists the same code, product, and size in another family at a "
     "different price; review the website before export"
 )
+
+
+def iran_date_stamp(now: datetime | None = None) -> str:
+    """Today's Gregorian date in Iran as ``YYYYMMDD``."""
+    moment = now or datetime.now(timezone.utc)
+    return moment.astimezone(IRAN_TIME).strftime("%Y%m%d")
+
+
+def cache_busting_url(url: str, *, now: datetime | None = None) -> str:
+    """``url`` with exactly one ``test=<today in Iran>``, other params kept."""
+    parts = urlsplit(url)
+    query = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if key != CACHE_BUSTING_PARAM
+    ]
+    query.append((CACHE_BUSTING_PARAM, iran_date_stamp(now)))
+    return urlunsplit(parts._replace(query=urlencode(query)))
 
 
 class ParsPlastWebsiteError(SupplierPdfError):
@@ -480,9 +506,15 @@ class ParsPlastWebsiteProcessor(BaseSupplierProcessor):
             "Pars Plast PDFs are scanned images; fetch its prices from the website instead"
         )
 
-    def fetch_price_list(self, *, fetch=fetch_html) -> tuple[SupplierParseResult, FetchedPage]:
-        """Download the official page and read every category from it."""
-        page = fetch(self.website_url, allowed_hosts=ALLOWED_HOSTS)
+    def fetch_price_list(
+        self, *, fetch=fetch_html, now: datetime | None = None
+    ) -> tuple[SupplierParseResult, FetchedPage]:
+        """Download the official page and read every category from it.
+
+        Each fetch adds today's Iranian date as ``test=YYYYMMDD`` so the site
+        does not serve a stale cached price list.
+        """
+        page = fetch(cache_busting_url(self.website_url, now=now), allowed_hosts=ALLOWED_HOSTS)
         result = parse_price_list_html(
             page.html,
             source_url=page.final_url,
