@@ -330,8 +330,8 @@ function Invoke-Workflow {
         -ContentType "application/pdf"
     Write-Host "OK pdf upload"
 
-    $match = Invoke-Json -Method POST -Url "$Base/api/sessions/$sid/match" `
-        -Body @{ suspicious_percent_threshold = "30" }
+    # Matching uses the saved warning thresholds (set in Invoke-ConfirmedMetreExport).
+    $match = Invoke-Json -Method POST -Url "$Base/api/sessions/$sid/match" -Body @{}
     if (-not $match.candidates) { throw "match returned no candidates" }
     Write-Host "OK match ($($match.candidates.Count) candidates)"
 
@@ -419,12 +419,17 @@ function Invoke-Workflow {
 function Invoke-ConfirmedMetreExport {
     param([string]$ExcelPath)
 
-    $null = Invoke-Json -Method PUT -Url "$Base/api/settings" -Body @{
+    $saved = Invoke-Json -Method PUT -Url "$Base/api/settings" -Body @{
         settings = @{
-            suspicious_percent_threshold = "30"
+            price_increase_warning_percent = "30"
+            price_decrease_warning_percent = "10"
         }
     }
-    Write-Host "OK warning-threshold setting"
+    if ($saved.settings.price_increase_warning_percent -ne "30" -or
+        $saved.settings.price_decrease_warning_percent -ne "10") {
+        throw "warning thresholds were not saved: $($saved.settings | ConvertTo-Json -Compress)"
+    }
+    Write-Host "OK warning-threshold settings"
 
     $sourceSha = Get-FileSha256 $ExcelPath
     $session = Invoke-Json -Method POST -Url "$Base/api/sessions"
