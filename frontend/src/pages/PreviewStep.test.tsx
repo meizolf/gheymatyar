@@ -90,8 +90,9 @@ describe('PreviewStep', () => {
   it('does not offer approval for a hard-blocked row', async () => {
     const blocked = {
       ...candidatesResponseFixture.candidates[1],
-      review_decision: 'EXCLUDE',
+      review_decision: 'INCLUDE',
       exportable: false,
+      approval: 'blocked' as const,
       warnings: [
         'price basis: supplier price is per metre and the Pioneers unit is \'شاخه 6 متری\'; no conversion was applied and automatic export is blocked',
       ],
@@ -123,44 +124,33 @@ describe('PreviewStep', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('shows automatic approval and still lets the user exclude it', async () => {
-    const user = userEvent.setup()
-    const auto = {
-      ...candidatesResponseFixture.candidates[0],
-      review_decision: 'INCLUDE' as const,
-      exportable: true,
-      approval: 'auto' as const,
-      warnings: [],
-    }
-    vi.mocked(api.preview).mockResolvedValue({ ...candidatesResponseFixture, candidates: [auto] })
-    vi.mocked(api.setReview).mockResolvedValue({ ...auto, review_decision: 'EXCLUDE', exportable: false, approval: 'excluded' })
-    renderPreview()
-    const row = (await screen.findAllByRole('row')).find((r) => within(r).queryByText('محصول الف'))!
-    expect(within(row).getByText('تأیید خودکار')).toBeInTheDocument()
-    expect(within(row).queryByRole('button', { name: /تأیید/ })).not.toBeInTheDocument()
-    await user.click(within(row).getByRole('button', { name: 'حذف از خروجی' }))
-    await waitFor(() => {
-      expect(api.setReview).toHaveBeenCalledWith('sess-1', 'c1', 'EXCLUDE')
-    })
-  })
-
-  it('approves a normal changed row for export', async () => {
-    const user = userEvent.setup()
-    vi.mocked(api.setReview).mockResolvedValue({
-      ...candidatesResponseFixture.candidates[0],
-      review_decision: 'APPROVE',
-      exportable: true,
-    })
-    renderPreview()
-    const row = (await screen.findAllByRole('row')).find((r) =>
-      within(r).queryByText('محصول الف'),
-    )!
-    expect(within(row).getByText('نیاز به تأیید')).toBeInTheDocument()
-    await user.click(within(row).getByRole('button', { name: 'تأیید برای خروجی' }))
-    await waitFor(() => {
-      expect(api.setReview).toHaveBeenCalledWith('sess-1', 'c1', 'APPROVE')
-    })
-  })
+  it.each([
+    ['auto', 'INCLUDE', 'تأیید خودکار'],
+    ['manual', 'APPROVE', 'تأیید دستی'],
+  ] as const)(
+    'offers no approve button for an %s-approved row, only exclusion',
+    async (approval, decision, label) => {
+      const user = userEvent.setup()
+      const row0 = {
+        ...candidatesResponseFixture.candidates[0],
+        review_decision: decision,
+        exportable: true,
+        approval,
+        warnings: approval === 'manual' ? ['price change 40.00% exceeds 30% increase threshold'] : [],
+      }
+      vi.mocked(api.preview).mockResolvedValue({ ...candidatesResponseFixture, candidates: [row0] })
+      vi.mocked(api.setReview).mockResolvedValue({ ...row0, review_decision: 'EXCLUDE', exportable: false, approval: 'excluded' })
+      renderPreview()
+      const row = (await screen.findAllByRole('row')).find((r) => within(r).queryByText('محصول الف'))!
+      expect(within(row).getByText(label)).toBeInTheDocument()
+      expect(within(row).getByText('نگاشت: نام دقیق')).toBeInTheDocument()
+      expect(within(row).queryByRole('button', { name: /تأیید/ })).not.toBeInTheDocument()
+      await user.click(within(row).getByRole('button', { name: 'حذف از خروجی' }))
+      await waitFor(() => {
+        expect(api.setReview).toHaveBeenCalledWith('sess-1', 'c1', 'EXCLUDE')
+      })
+    },
+  )
 
   it('approves warned updates', async () => {
     const user = userEvent.setup()

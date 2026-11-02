@@ -1,4 +1,4 @@
-"""Changes within the warning threshold are approved automatically."""
+"""Changes within the increase/decrease warning thresholds are approved automatically."""
 
 from __future__ import annotations
 
@@ -9,12 +9,13 @@ import pytest
 from gheymatyar.domain.enums import MatchStatus, ReviewDecision
 from gheymatyar.domain.update_candidate import UpdateCandidate
 from gheymatyar.services.price_validation import (
+    PriceThresholds,
     apply_price_warnings,
     approval_state,
     is_exportable,
 )
 
-THRESHOLD = Decimal("50")
+THRESHOLDS = PriceThresholds(increase=Decimal("50"), decrease=Decimal("20"))
 
 
 def _row(new: str, *, old: str = "1000", decision=ReviewDecision.INCLUDE,
@@ -32,7 +33,7 @@ def _row(new: str, *, old: str = "1000", decision=ReviewDecision.INCLUDE,
 
 def _checked(candidate: UpdateCandidate, conflicted=frozenset()) -> UpdateCandidate:
     return apply_price_warnings(
-        [candidate], suspicious_percent_threshold=THRESHOLD, conflicted_row_numbers=conflicted
+        [candidate], thresholds=THRESHOLDS, conflicted_row_numbers=conflicted
     )[0]
 
 
@@ -40,8 +41,11 @@ def _checked(candidate: UpdateCandidate, conflicted=frozenset()) -> UpdateCandid
     ("label", "candidate", "state", "exported"),
     [
         ("8% up", _row("1080"), "auto", True),
-        ("30% down", _row("700"), "auto", True),
-        ("exactly 50%", _row("1500"), "auto", True),
+        ("exactly +50%", _row("1500"), "auto", True),
+        ("just over +50%", _row("1501"), "required", False),
+        ("exactly -20%", _row("800"), "auto", True),
+        ("just under -20%", _row("799"), "required", False),
+        ("30% down", _row("700"), "required", False),
         ("70% up", _row("1700"), "required", False),
         ("70% up, approved", _row("1700", decision=ReviewDecision.APPROVE), "manual", True),
         ("previous price zero", _row("500", old="0"), "required", False),
@@ -74,5 +78,7 @@ def test_rechecks_neither_duplicate_warnings_nor_turn_into_exclusions() -> None:
     assert twice.warnings == once.warnings and len(once.warnings) == 1
     assert twice.review_decision is ReviewDecision.INCLUDE  # still the user's call
     # A higher threshold later approves the same untouched row automatically.
-    relaxed = apply_price_warnings([twice], suspicious_percent_threshold=Decimal("80"))[0]
+    relaxed = apply_price_warnings(
+        [twice], thresholds=PriceThresholds(Decimal("80"), Decimal("20"))
+    )[0]
     assert relaxed.warnings == [] and approval_state(relaxed) == "auto"

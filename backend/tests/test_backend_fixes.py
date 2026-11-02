@@ -29,8 +29,9 @@ from gheymatyar.services.matching import match_supplier_items
 from gheymatyar.services.price_validation import (
     IDENTITY_CONFLICT_WARNING,
     is_exportable,
-    parse_suspicious_percent_threshold,
-    resolve_suspicious_percent_threshold,
+    PriceThresholds,
+    parse_warning_percent,
+    resolve_price_thresholds,
 )
 from gheymatyar.services.processing import ProcessingService
 from gheymatyar.services.session_store import SessionStore
@@ -676,38 +677,32 @@ def test_duplicate_pioneers_code_cannot_export_even_if_approved() -> None:
 # --- 5. Threshold resolution ---
 
 
-def test_threshold_request_overrides_saved_overrides_default(db: Database) -> None:
-    with db.session() as sess:
-        SettingsRepository(sess).set("suspicious_percent_threshold", "15")
-        saved = SettingsRepository(sess).get("suspicious_percent_threshold")
-        assert saved is not None
-        resolved = resolve_suspicious_percent_threshold(
-            request_value="40",
-            saved_value=saved.value,
-        )
-        assert resolved == Decimal("40")
-        resolved_saved = resolve_suspicious_percent_threshold(
-            request_value=None,
-            saved_value=saved.value,
-        )
-        assert resolved_saved == Decimal("15")
-        resolved_default = resolve_suspicious_percent_threshold(
-            request_value=None,
-            saved_value=None,
-        )
-        assert resolved_default == Decimal("30")
+@pytest.mark.parametrize(
+    ("saved", "expected"),
+    [
+        ({}, PriceThresholds(Decimal("30"), Decimal("10"))),
+        ({"suspicious_percent_threshold": "15"}, PriceThresholds(Decimal("15"), Decimal("10"))),
+        (
+            {"suspicious_percent_threshold": "15", "price_increase_warning_percent": "40",
+             "price_decrease_warning_percent": "5"},
+            PriceThresholds(Decimal("40"), Decimal("5")),
+        ),
+    ],
+)
+def test_thresholds_resolve_new_keys_then_legacy_then_default(saved, expected) -> None:
+    assert resolve_price_thresholds(saved) == expected
 
 
 @pytest.mark.parametrize("bad", ["0", "-5", "NaN", "Infinity", "-Infinity", "abc", ""])
 def test_threshold_rejects_invalid_values(bad: str) -> None:
     with pytest.raises(ValueError):
-        parse_suspicious_percent_threshold(bad)
+        parse_warning_percent(bad, name="price_increase_warning_percent")
 
 
 def test_match_uses_saved_threshold(client, pioneers_azin_excel: Path, azin_pdf: Path) -> None:
     client.put(
         "/api/settings",
-        json={"settings": {"suspicious_percent_threshold": "5"}},
+        json={"settings": {"price_increase_warning_percent": "5"}},
     )
     sid = client.post("/api/sessions").json()["session_id"]
     with pioneers_azin_excel.open("rb") as handle:

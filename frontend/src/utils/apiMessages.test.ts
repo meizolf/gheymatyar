@@ -41,8 +41,11 @@ describe('translateApiDetail', () => {
       translateApiDetail('price change 70.21% exceeds 30% threshold'),
     ).toMatch(/تأیید هشدار/)
     expect(
-      translateApiDetail('price change -45.50% exceeds 30% threshold'),
-    ).toMatch(/-45\.50/)
+      translateApiDetail('price change -45.50% exceeds 10% decrease threshold'),
+    ).toMatch(/-45\.50٪ از آستانه کاهش 10٪/)
+    expect(
+      translateApiDetail('price change 40.00% exceeds 30% increase threshold'),
+    ).toMatch(/آستانه افزایش 30٪/)
   })
 
   it('translates zero previous price warning', () => {

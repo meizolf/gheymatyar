@@ -12,6 +12,7 @@ import { translateApiDetail } from '../utils/apiMessages'
 import {
   formatPercent,
   formatPrice,
+  MATCH_TYPE_LABEL,
   REVIEW_LABEL,
 } from '../utils/format'
 import { matchesSearch } from '../utils/searchNormalize'
@@ -38,11 +39,12 @@ const TAX_LABEL: Record<string, string> = {
   not_stated: 'مالیات در سند نیامده',
 }
 
-// Shown for the backend's approval state; the server decides export.
+// Price approval as the backend decides it (export uses the same state).
+// A confirmed mapping is shown separately under the Pioneers name.
 const APPROVAL_BADGE: Record<string, { label: string; tone: 'ok' | 'warn' | 'danger' | 'neutral' }> = {
   auto: { label: 'تأیید خودکار', tone: 'ok' },
   manual: { label: 'تأیید دستی', tone: 'ok' },
-  required: { label: 'نیاز به تأیید', tone: 'warn' },
+  required: { label: 'نیاز به تأیید هشدار', tone: 'warn' },
   blocked: { label: 'مسدود', tone: 'danger' },
   excluded: { label: 'حذف از خروجی', tone: 'neutral' },
   unchanged: { label: 'بدون تغییر', tone: 'neutral' },
@@ -352,12 +354,11 @@ export function PreviewStep() {
                 const softWarnings = approvableWarnings(c)
                 const excluded = c.review_decision === 'EXCLUDE'
                 const priceChanged = isPriceChanged(c)
-                const approved = c.review_decision === 'APPROVE'
-                // Within the threshold the backend approves automatically.
-                const needsApprove = c.approval
-                  ? c.approval === 'required'
-                  : !blocked && !excluded && priceChanged && !approved
+                // Only a warning the backend still holds needs a click;
+                // automatic and manual approvals offer no approve button.
+                const needsApprove = c.approval === 'required'
                 const badge = c.approval ? APPROVAL_BADGE[c.approval] : undefined
+                const mapping = c.match_type ? MATCH_TYPE_LABEL[c.match_type] : undefined
                 const provenance = provenanceText(c)
                 return (
                   <tr
@@ -380,7 +381,12 @@ export function PreviewStep() {
                         <div className="provenance">{provenance}</div>
                       ) : null}
                     </td>
-                    <td>{c.pioneers_name ?? '—'}</td>
+                    <td>
+                      {c.pioneers_name ?? '—'}
+                      {mapping ? (
+                        <div className="provenance">نگاشت: {mapping}</div>
+                      ) : null}
+                    </td>
                     <td className="ltr">{formatPrice(c.old_price)}</td>
                     <td className="ltr">{formatPrice(c.new_price)}</td>
                     <td className="ltr">{formatPrice(c.absolute_change)}</td>
@@ -389,36 +395,15 @@ export function PreviewStep() {
                     </td>
                     <td>
                       <Badge
-                        tone={
-                          badge
-                            ? badge.tone
-                            : blocked
-                            ? 'danger'
-                            : c.exportable
-                              ? 'ok'
-                              : needsApprove
-                                ? 'warn'
-                                : excluded
-                                  ? 'neutral'
-                                  : 'danger'
-                        }
+                        tone={badge ? badge.tone : blocked ? 'danger' : 'neutral'}
                       >
                         {badge
                           ? badge.label
                           : blocked
-                          ? 'مسدود'
-                          : c.exportable
-                            ? 'تأییدشده'
-                            : needsApprove && softWarnings.length > 0
-                              ? 'نیاز به تأیید هشدار'
-                              : needsApprove
-                                ? 'نیاز به تأیید'
-                                : !priceChanged &&
-                                    c.status === 'MATCHED' &&
-                                    !excluded
-                                  ? 'بدون تغییر'
-                                  : (REVIEW_LABEL[c.review_decision] ??
-                                    c.review_decision)}
+                            ? 'مسدود'
+                            : !priceChanged && c.status === 'MATCHED' && !excluded
+                              ? 'بدون تغییر'
+                              : (REVIEW_LABEL[c.review_decision] ?? c.review_decision)}
                       </Badge>
                     </td>
                     <td>
@@ -466,7 +451,7 @@ export function PreviewStep() {
                             شامل کردن
                           </Button>
                         ) : null}
-                        {!blocked && !excluded && needsApprove && softWarnings.length > 0 ? (
+                        {!blocked && !excluded && needsApprove ? (
                           <Button
                             size="sm"
                             disabled={opsPending}
@@ -478,20 +463,6 @@ export function PreviewStep() {
                             }
                           >
                             تأیید هشدار
-                          </Button>
-                        ) : null}
-                        {!blocked && !excluded && needsApprove && softWarnings.length === 0 ? (
-                          <Button
-                            size="sm"
-                            disabled={opsPending}
-                            onClick={() =>
-                              void reviewMutation.mutateAsync({
-                                candidateId: c.candidate_id,
-                                decision: 'APPROVE',
-                              })
-                            }
-                          >
-                            تأیید برای خروجی
                           </Button>
                         ) : null}
                         {!excluded ? (

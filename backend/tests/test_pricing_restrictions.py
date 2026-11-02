@@ -157,10 +157,10 @@ def test_threshold_save_does_not_drop_an_approved_export(
 
     saved = client.put(
         "/api/settings",
-        json={"settings": {"suspicious_percent_threshold": "40"}},
+        json={"settings": {"price_increase_warning_percent": "40"}},
     )
     assert saved.status_code == 200, saved.text
-    assert saved.json()["settings"] == {"suspicious_percent_threshold": "40"}
+    assert saved.json()["settings"]["price_increase_warning_percent"] == "40"
     assert "pioneers_sale_currency" not in saved.json()["settings"]
     assert "pioneers_sale_basis" not in saved.json()["settings"]
 
@@ -174,4 +174,7 @@ def test_threshold_save_does_not_drop_an_approved_export(
 
 def test_default_settings_are_only_the_warning_threshold(client: TestClient) -> None:
     body = client.get("/api/settings").json()["settings"]
-    assert body == {"suspicious_percent_threshold": "30"}
+    assert body == {
+        "price_increase_warning_percent": "30",
+        "price_decrease_warning_percent": "10",
+    }

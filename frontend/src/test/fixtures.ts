@@ -48,7 +48,8 @@ export const candidatesFixture: Candidate[] = [
     review_decision: 'INCLUDE',
     warnings: [],
     suggestions: [],
-    exportable: false,
+    exportable: true,
+    approval: 'auto',
     supplier_name_normalized: 'محصول الف تامین',
   },
   {
@@ -65,9 +66,10 @@ export const candidatesFixture: Candidate[] = [
     match_type: 'EXACT_NAME',
     status: 'MATCHED',
     review_decision: 'INCLUDE',
-    warnings: ['price change 100% exceeds 30% threshold'],
+    warnings: ['price change 100% exceeds 30% increase threshold'],
     suggestions: [],
     exportable: false,
+    approval: 'required',
     supplier_name_normalized: 'محصول ب تامین',
   },
   {

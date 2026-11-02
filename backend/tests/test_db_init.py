@@ -150,6 +150,9 @@ def test_obsolete_sale_settings_are_removed_without_resetting_user_data(
         assert settings.get("pioneers_sale_currency") is None
         assert settings.get("pioneers_sale_basis") is None
         assert settings.get("suspicious_percent_threshold").value == "18"
+        # The single threshold seeds the increase one; decrease uses its default.
+        assert settings.get("price_increase_warning_percent").value == "18"
+        assert settings.get("price_decrease_warning_percent") is None
         loaded = MappingRepository(session).get_by_id(mapping_id)
         assert loaded.pioneers_code == "416"
         assert loaded.pioneers_name_raw == "شیلنگ کیان"
@@ -167,7 +170,7 @@ def test_obsolete_sale_settings_are_removed_without_resetting_user_data(
         settings = SettingsRepository(session)
         assert settings.get("pioneers_sale_currency") is None
         assert settings.get("pioneers_sale_basis") is None
-        assert settings.get("suspicious_percent_threshold").value == "18"
+        assert settings.get("price_increase_warning_percent").value == "18"
         loaded = MappingRepository(session).get_by_id(mapping_id)
         assert loaded is not None
         assert loaded.pioneers_code == "416"

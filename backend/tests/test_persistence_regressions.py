@@ -636,10 +636,9 @@ def test_legacy_mapping_does_not_leak_between_single_variant_uploads(
 
 def test_restore_preserves_unrelated_exclusion(client, tmp_path: Path) -> None:
     sid, keep, drop = setup_rows(client, tmp_path)
-    rematched = client.post(
-        f"/api/sessions/{sid}/match",
-        json={"suspicious_percent_threshold": "1000"},
-    )
+    client.put("/api/settings", json={"settings": {
+        "price_increase_warning_percent": "1000", "price_decrease_warning_percent": "1000"}})
+    rematched = client.post(f"/api/sessions/{sid}/match")
     assert rematched.status_code == 200, rematched.text
     rows = rematched.json()["candidates"]
     keep_row = next(row for row in rows if row["supplier_code"] == keep["supplier_code"])

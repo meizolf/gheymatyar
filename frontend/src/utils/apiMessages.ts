@@ -153,9 +153,11 @@ const PATTERNS: Array<{ re: RegExp; fa: string | ((m: RegExpMatchArray) => strin
     fa: 'ذخیرهٔ تصمیم انجام نشد. وضعیت قبلی حفظ شده است.',
   },
   {
-    re: /price change (-?[\d.]+)% exceeds ([\d.]+)% threshold/i,
-    fa: (m) =>
-      `تغییر قیمت ${m[1]}٪ از آستانه ${m[2]}٪ بیشتر است و نیاز به تأیید هشدار دارد.`,
+    re: /price change (-?[\d.]+)% exceeds ([\d.]+)% (increase |decrease )?threshold/i,
+    fa: (m) => {
+      const kind = !m[3] ? '' : m[3].trim() === 'decrease' ? 'کاهش ' : 'افزایش '
+      return `تغییر قیمت ${m[1]}٪ از آستانه ${kind}${m[2]}٪ فراتر است و نیاز به تأیید هشدار دارد.`
+    },
   },
   {
     re: /previous sale price was zero; percentage change undefined/i,
@@ -259,7 +261,7 @@ const PATTERNS: Array<{ re: RegExp; fa: string | ((m: RegExpMatchArray) => strin
     fa: 'مقدار تنظیمات نباید خالی باشد.',
   },
   {
-    re: /suspicious_percent_threshold must be/i,
+    re: /(suspicious_percent_threshold|price_(increase|decrease)_warning_percent) must be/i,
     fa: 'آستانه هشدار تغییر قیمت باید یک عدد مثبت معتبر باشد.',
   },
   {

@@ -6,11 +6,13 @@ import { Alert } from '../components/ui/Alert'
 import { Button } from '../components/ui/Button'
 import { Spinner } from '../components/ui/Spinner'
 
-const THRESHOLD_KEY = 'suspicious_percent_threshold'
+const INCREASE_KEY = 'price_increase_warning_percent'
+const DECREASE_KEY = 'price_decrease_warning_percent'
 
 export function SettingsPage() {
   const queryClient = useQueryClient()
-  const [threshold, setThreshold] = useState('30')
+  const [increase, setIncrease] = useState('30')
+  const [decrease, setDecrease] = useState('10')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -22,16 +24,20 @@ export function SettingsPage() {
   useEffect(() => {
     const stored = settingsQuery.data?.settings
     if (!stored) return
-    if (stored[THRESHOLD_KEY]) setThreshold(stored[THRESHOLD_KEY])
+    if (stored[INCREASE_KEY]) setIncrease(stored[INCREASE_KEY])
+    if (stored[DECREASE_KEY]) setDecrease(stored[DECREASE_KEY])
   }, [settingsQuery.data])
 
   const saveMutation = useMutation({
     mutationFn: () =>
       api.updateSettings({
-        [THRESHOLD_KEY]: threshold.trim(),
+        [INCREASE_KEY]: increase.trim(),
+        [DECREASE_KEY]: decrease.trim(),
       }),
+    // The server has already re-checked the open session; refetch so the
+    // price review and export step show its new warnings and approvals.
     onSuccess: async () => {
-      setMessage('تنظیمات ذخیره شد.')
+      setMessage('تنظیمات ذخیره شد و روی بررسی قیمت فعلی اعمال شد.')
       setError(null)
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['settings'] }),
@@ -72,21 +78,36 @@ export function SettingsPage() {
           }}
         >
           <div className="field" style={{ maxWidth: 320 }}>
-            <label htmlFor="threshold">
-              آستانه هشدار تغییر قیمت (درصد)
+            <label htmlFor="increase-threshold">
+              آستانه هشدار افزایش قیمت (درصد)
             </label>
             <input
-              id="threshold"
+              id="increase-threshold"
               inputMode="decimal"
               className="ltr"
-              value={threshold}
-              onChange={(e) => setThreshold(e.target.value)}
+              value={increase}
+              onChange={(e) => setIncrease(e.target.value)}
+              required
+            />
+          </div>
+          <div className="field" style={{ maxWidth: 320 }}>
+            <label htmlFor="decrease-threshold">
+              آستانه هشدار کاهش قیمت (درصد)
+            </label>
+            <input
+              id="decrease-threshold"
+              inputMode="decimal"
+              className="ltr"
+              value={decrease}
+              onChange={(e) => setDecrease(e.target.value)}
               required
             />
             <p className="field-hint">
-              تغییرات مطلق بیش از این درصد نیاز به تأیید صریح دارند. مقدار پیش‌فرض
-              سرور: ۳۰. نرخ فروش اصلی پایونیرز همیشه ریال است و قیمت در متراژ یا
-              تعداد بسته ضرب نمی‌شود.
+              افزایش بیش از آستانه افزایش یا کاهش بیش از آستانه کاهش نیاز به
+              تأیید هشدار دارد؛ تغییرات تا خود آستانه خودکار تأیید می‌شوند. هر دو
+              عدد مثبت‌اند (پیش‌فرض ۳۰ و ۱۰). ذخیره، همین حالا روی بررسی قیمت باز
+              اعمال می‌شود. نرخ فروش اصلی پایونیرز همیشه ریال است و قیمت در متراژ
+              یا تعداد بسته ضرب نمی‌شود.
             </p>
           </div>
 

@@ -54,21 +54,36 @@ from gheymatyar.services.pioneers_excel_writer import (
 )
 from gheymatyar.services.pioneers_legacy_xls_writer import write_pioneers_legacy_xls
 from gheymatyar.services.price_validation import (
-    DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
+    DECREASE_THRESHOLD_KEY,
     IDENTITY_CONFLICT_WARNING,
+    INCREASE_THRESHOLD_KEY,
+    LEGACY_THRESHOLD_KEY,
+    PriceThresholds,
     apply_price_warnings,
     apply_sale_compatibility,
     approval_state,
     assemble_export_updates,
     is_exportable,
-    resolve_suspicious_percent_threshold,
+    reevaluate_price_thresholds,
+    resolve_price_thresholds,
 )
 from gheymatyar.services.session_store import ProcessingSession, SessionStore
 from gheymatyar.suppliers.errors import UnsupportedSupplierError
 from gheymatyar.suppliers.registry import SupplierProcessorRegistry, get_default_registry
 
 _SAFE_FILENAME_RE = re.compile(r"[^\w.\-()+ \u0600-\u06FF]+", re.UNICODE)
-SETTING_THRESHOLD_KEY = "suspicious_percent_threshold"
+# Thresholds the session's warnings were last computed with.
+_THRESHOLDS_KEY = "price_thresholds"
+
+
+def load_price_thresholds(db_session: Session) -> PriceThresholds:
+    """The saved increase/decrease warning thresholds (always read fresh)."""
+    repo = SettingsRepository(db_session)
+    saved = {}
+    for key in (INCREASE_THRESHOLD_KEY, DECREASE_THRESHOLD_KEY, LEGACY_THRESHOLD_KEY):
+        row = repo.get(key)
+        saved[key] = row.value if row is not None else None
+    return resolve_price_thresholds(saved)
 
 
 def _refresh_sale_compatibility(session: ProcessingSession) -> list[UpdateCandidate]:
@@ -598,26 +613,12 @@ class ProcessingService:
             _invalidate_export(session)
             return session
 
-    def run_matching(
-        self,
-        session_id: str,
-        db_session: Session,
-        *,
-        suspicious_percent_threshold: str | None = None,
-    ) -> ProcessingSession:
+    def run_matching(self, session_id: str, db_session: Session) -> ProcessingSession:
         with self._store.session_lock(session_id):
-            return self._run_matching_unlocked(
-                session_id,
-                db_session,
-                suspicious_percent_threshold=suspicious_percent_threshold,
-            )
+            return self._run_matching_unlocked(session_id, db_session)
 
     def _run_matching_unlocked(
-        self,
-        session_id: str,
-        db_session: Session,
-        *,
-        suspicious_percent_threshold: str | None = None,
+        self, session_id: str, db_session: Session
     ) -> ProcessingSession:
         session = self._store.require(session_id)
         if not session.products:
@@ -640,14 +641,13 @@ class ProcessingService:
             processor,
             supplier_id=supplier_row.id,
             ignored_identities=ignored,
-            suspicious_percent_threshold=suspicious_percent_threshold,
         )
         session.candidates = candidates
         session.matched_count = match_result.matched_count
         session.unmatched_count = match_result.unmatched_count
         session.ambiguous_count = match_result.ambiguous_count
         session.ignored_count = match_result.ignored_count
-        session.metadata["suspicious_percent_threshold"] = str(threshold)
+        session.metadata[_THRESHOLDS_KEY] = threshold
         session.metadata.pop(_MANUAL_BASIS_KEY, None)
         _invalidate_export(session)
         return session
@@ -818,13 +818,9 @@ class ProcessingService:
                 updated,
                 target_unit=product.unit,
             )
-            threshold = resolve_suspicious_percent_threshold(
-                request_value=session.metadata.get("suspicious_percent_threshold"),
-                default=DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
-            )
             updated = apply_price_warnings(
                 [updated],
-                suspicious_percent_threshold=threshold,
+                thresholds=self._thresholds(session, db_session),
                 conflicted_row_numbers=session.conflicted_row_numbers,
             )[0]
             # Check and save under one lock: two requests must not both
@@ -982,9 +978,6 @@ class ProcessingService:
                 processor,
                 supplier_id=supplier_row.id,
                 ignored_identities=ignored,
-                suspicious_percent_threshold=session.metadata.get(
-                    "suspicious_percent_threshold"
-                ),
             )
             self._replace_candidates_preserving_reviews(
                 session,
@@ -1017,7 +1010,47 @@ class ProcessingService:
         with self._store.session_lock(session_id):
             session = self._store.require(session_id)
             self._apply_saved_ignores_unlocked(session, db_session)
+            self._recheck_thresholds_unlocked(session, db_session)
             return session
+
+    def recheck_price_thresholds(self, db_session: Session) -> None:
+        """Apply newly saved thresholds to every live session at once.
+
+        Only warnings and approval eligibility are recomputed; files are not
+        re-read, products are not re-matched, and decisions are kept.
+        """
+        for session in self._store.snapshot():
+            with self._store.session_lock(session.session_id):
+                if self._store.get(session.session_id) is session:
+                    self._recheck_thresholds_unlocked(session, db_session)
+
+    def _thresholds(
+        self, session: ProcessingSession, db_session: Session | None
+    ) -> PriceThresholds:
+        if db_session is None:
+            return session.metadata.get(_THRESHOLDS_KEY) or PriceThresholds()
+        return load_price_thresholds(db_session)
+
+    def _recheck_thresholds_unlocked(
+        self, session: ProcessingSession, db_session: Session | None
+    ) -> None:
+        thresholds = self._thresholds(session, db_session)
+        previous = session.metadata.get(_THRESHOLDS_KEY)
+        recheck = (
+            reevaluate_price_thresholds
+            if previous is not None and previous != thresholds
+            else apply_price_warnings
+        )
+        exportable_before = [is_exportable(c) for c in session.candidates]
+        session.candidates = recheck(
+            session.candidates,
+            thresholds=thresholds,
+            conflicted_row_numbers=session.conflicted_row_numbers,
+        )
+        if exportable_before != [is_exportable(c) for c in session.candidates]:
+            _invalidate_export(session)  # a generated workbook no longer matches
+        if session.candidates or previous is not None:
+            session.metadata[_THRESHOLDS_KEY] = thresholds
 
     def set_review_decision(
         self,
@@ -1224,9 +1257,6 @@ class ProcessingService:
             processor,
             supplier_id=supplier_row.id,
             ignored_identities=ignored,
-            suspicious_percent_threshold=session.metadata.get(
-                "suspicious_percent_threshold"
-            ),
         )
         self._replace_candidates_preserving_reviews(
             session,
@@ -1259,15 +1289,10 @@ class ProcessingService:
         )
 
         # Snapshot decisions under the same lock that review mutations use.
-        guarded = apply_price_warnings(
-            _refresh_sale_compatibility(session),
-            suspicious_percent_threshold=resolve_suspicious_percent_threshold(
-                request_value=session.metadata.get("suspicious_percent_threshold"),
-                default=DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
-            ),
-            conflicted_row_numbers=session.conflicted_row_numbers,
-        )
-        session.candidates = guarded
+        # The thresholds are read from the settings again here, so a stale
+        # preview can never export under thresholds that have since changed.
+        session.candidates = _refresh_sale_compatibility(session)
+        self._recheck_thresholds_unlocked(session, db_session)
 
         updates = assemble_export_updates(session.candidates)
         if not updates:
@@ -1364,7 +1389,6 @@ class ProcessingService:
         *,
         supplier_id: int,
         ignored_identities: set[str],
-        suspicious_percent_threshold: str | None,
     ):
         saved = [
             SavedNameMapping(
@@ -1386,15 +1410,10 @@ class ProcessingService:
             saved_mappings=saved,
             ignored_identities=ignored_identities,
         )
-        saved_setting = SettingsRepository(db_session).get(SETTING_THRESHOLD_KEY)
-        threshold = resolve_suspicious_percent_threshold(
-            request_value=suspicious_percent_threshold,
-            saved_value=saved_setting.value if saved_setting else None,
-            default=DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
-        )
+        threshold = load_price_thresholds(db_session)
         candidates = apply_price_warnings(
             match_result.candidates,
-            suspicious_percent_threshold=threshold,
+            thresholds=threshold,
             conflicted_row_numbers=session.conflicted_row_numbers,
         )
         return match_result, candidates, threshold

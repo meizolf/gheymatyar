@@ -94,12 +94,9 @@ class ConfirmSupplierRequest(BaseModel):
 
 
 class MatchRequest(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
+    """Matching always uses the saved warning thresholds (see /settings)."""
 
-    suspicious_percent_threshold: str | None = Field(
-        default=None,
-        description="Absolute percent threshold for suspicious price changes (default 30)",
-    )
+    model_config = ConfigDict(str_strip_whitespace=True)
 
 
 class CandidateResponse(BaseModel):

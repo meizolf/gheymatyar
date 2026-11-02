@@ -23,14 +23,18 @@ def test_list_suppliers(client) -> None:
 def test_settings_round_trip(client) -> None:
     get_resp = client.get("/api/settings")
     assert get_resp.status_code == 200
-    assert "suspicious_percent_threshold" in get_resp.json()["settings"]
+    assert get_resp.json()["settings"] == {
+        "price_increase_warning_percent": "30",
+        "price_decrease_warning_percent": "10",
+    }
 
     put_resp = client.put(
         "/api/settings",
-        json={"settings": {"suspicious_percent_threshold": "25"}},
+        json={"settings": {"price_decrease_warning_percent": "25"}},
     )
     assert put_resp.status_code == 200
-    assert put_resp.json()["settings"]["suspicious_percent_threshold"] == "25"
+    assert put_resp.json()["settings"]["price_decrease_warning_percent"] == "25"
+    assert put_resp.json()["settings"]["price_increase_warning_percent"] == "30"
 
     bad = client.put("/api/settings", json={"settings": {"unknown": "1"}})
     assert bad.status_code == 400
@@ -92,7 +96,6 @@ def test_end_to_end_azin_workflow(
     # 4) match
     match_resp = client.post(
         f"/api/sessions/{session_id}/match",
-        json={"suspicious_percent_threshold": "30"},
     )
     assert match_resp.status_code == 200, match_resp.text
     payload = match_resp.json()

@@ -14,7 +14,8 @@ from gheymatyar.services.processing import ProcessingService
 from gheymatyar.services.session_store import SessionStore
 
 DEFAULT_SETTING_KEYS = {
-    "suspicious_percent_threshold": "30",
+    "price_increase_warning_percent": "30",
+    "price_decrease_warning_percent": "10",
 }
 
 

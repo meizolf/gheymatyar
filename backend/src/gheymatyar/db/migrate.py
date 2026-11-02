@@ -81,6 +81,7 @@ def migrate_schema(engine: Engine) -> list[str]:
     notes: list[str] = []
     with _migration_transaction(engine) as conn:
         notes.extend(_purge_obsolete_settings(conn))
+        notes.extend(_seed_split_price_thresholds(conn))
         notes.extend(_recover_interrupted_variant_upgrade(conn))
         inspect(conn).clear_cache()
         inspector = inspect(conn)
@@ -139,6 +140,27 @@ def _purge_obsolete_settings(conn: Any) -> list[str]:
     if not removed:
         return []
     return [f"removed {removed} obsolete sale-policy setting key(s)"]
+
+
+def _seed_split_price_thresholds(conn: Any) -> list[str]:
+    """Copy the single warning threshold into the new increase threshold.
+
+    Runs once in effect: it only inserts when the increase key is missing.
+    The old row is kept, and the decrease threshold starts at its default.
+    """
+    if "settings" not in set(inspect(conn).get_table_names()):
+        return []
+    result = conn.execute(
+        text(
+            "INSERT INTO settings (key, value) "
+            "SELECT :new, value FROM settings WHERE key = :old "
+            "AND NOT EXISTS (SELECT 1 FROM settings WHERE key = :new)"
+        ),
+        {"new": "price_increase_warning_percent", "old": "suspicious_percent_threshold"},
+    )
+    if not result.rowcount:
+        return []
+    return ["copied suspicious_percent_threshold to price_increase_warning_percent"]
 
 
 def _table_names(conn: Any) -> set[str]:

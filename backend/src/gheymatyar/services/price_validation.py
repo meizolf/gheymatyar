@@ -2,15 +2,30 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import AbstractSet, Sequence
+from typing import AbstractSet, Mapping, Sequence
 
 from gheymatyar.domain.enums import MatchStatus, ReviewDecision
 from gheymatyar.domain.final_sale_price import FinalSalePriceUpdate
 from gheymatyar.domain.sale_policy import PIONEERS_SALE_CURRENCY
 from gheymatyar.domain.update_candidate import UpdateCandidate
 
-DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD = Decimal("30")
+#: Settings keys. Both are positive magnitudes; a decrease of 12% exceeds a
+#: 10% decrease threshold. The single legacy key seeds the increase one.
+INCREASE_THRESHOLD_KEY = "price_increase_warning_percent"
+DECREASE_THRESHOLD_KEY = "price_decrease_warning_percent"
+LEGACY_THRESHOLD_KEY = "suspicious_percent_threshold"
+DEFAULT_INCREASE_WARNING_PERCENT = Decimal("30")
+DEFAULT_DECREASE_WARNING_PERCENT = Decimal("10")
+
+
+@dataclass(frozen=True)
+class PriceThresholds:
+    """Signed warning limits: above ``+increase`` or below ``-decrease`` warns."""
+
+    increase: Decimal = DEFAULT_INCREASE_WARNING_PERCENT
+    decrease: Decimal = DEFAULT_DECREASE_WARNING_PERCENT
 
 IDENTITY_CONFLICT_WARNING = (
     "duplicate Pioneers product code; cannot export until uniqueness is resolved"
@@ -24,59 +39,81 @@ def _is_computed_price_warning(text: str) -> bool:
     """Warnings rebuilt on every pass, so they never pile up as duplicates."""
     return (
         text in {IDENTITY_CONFLICT_WARNING, ZERO_OLD_PRICE_WARNING, NON_POSITIVE_PRICE_WARNING}
-        or (text.startswith(_THRESHOLD_WARNING_PREFIX) and "% threshold" in text)
+        or (text.startswith(_THRESHOLD_WARNING_PREFIX) and "threshold" in text)
     )
 
 
-def parse_suspicious_percent_threshold(raw: str | Decimal | None) -> Decimal:
-    """Parse and validate a suspicious-change threshold percentage.
+def _needs_change_approval(candidate: UpdateCandidate) -> bool:
+    return any(
+        w == ZERO_OLD_PRICE_WARNING
+        or (w.startswith(_THRESHOLD_WARNING_PREFIX) and "threshold" in w)
+        for w in candidate.warnings
+    )
+
+
+def parse_warning_percent(raw: str | Decimal | None, *, name: str) -> Decimal:
+    """Parse a warning threshold percentage (a positive magnitude).
 
     Rejects empty, non-numeric, non-finite, zero, and negative values.
     """
     if raw is None:
-        raise ValueError("suspicious_percent_threshold is required")
+        raise ValueError(f"{name} is required")
     if isinstance(raw, Decimal):
         value = raw
     else:
         text = str(raw).strip()
-        if not text:
-            raise ValueError("suspicious_percent_threshold must be a positive number")
         try:
             value = Decimal(text)
         except InvalidOperation as exc:
-            raise ValueError(
-                "suspicious_percent_threshold must be a positive number"
-            ) from exc
+            raise ValueError(f"{name} must be a positive number") from exc
     if not value.is_finite():
-        raise ValueError("suspicious_percent_threshold must be a finite number")
+        raise ValueError(f"{name} must be a finite number")
     if value <= 0:
-        raise ValueError("suspicious_percent_threshold must be greater than zero")
+        raise ValueError(f"{name} must be greater than zero")
     return value
 
 
-def resolve_suspicious_percent_threshold(
-    *,
-    request_value: str | Decimal | None = None,
-    saved_value: str | None = None,
-    default: Decimal = DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
-) -> Decimal:
-    """Resolve threshold: request override → saved setting → default."""
-    if request_value is not None and str(request_value).strip() != "":
-        return parse_suspicious_percent_threshold(request_value)
-    if saved_value is not None and str(saved_value).strip() != "":
-        return parse_suspicious_percent_threshold(saved_value)
-    return default
+def resolve_price_thresholds(saved: Mapping[str, str | None]) -> PriceThresholds:
+    """Thresholds from saved settings; the legacy key seeds the increase one."""
+    increase = saved.get(INCREASE_THRESHOLD_KEY) or saved.get(LEGACY_THRESHOLD_KEY)
+    decrease = saved.get(DECREASE_THRESHOLD_KEY)
+    return PriceThresholds(
+        increase=parse_warning_percent(increase, name=INCREASE_THRESHOLD_KEY)
+        if increase
+        else DEFAULT_INCREASE_WARNING_PERCENT,
+        decrease=parse_warning_percent(decrease, name=DECREASE_THRESHOLD_KEY)
+        if decrease
+        else DEFAULT_DECREASE_WARNING_PERCENT,
+    )
+
+
+def _threshold_warning(
+    percentage: Decimal | None, thresholds: PriceThresholds
+) -> str | None:
+    if percentage is None:
+        return None
+    if percentage > thresholds.increase:
+        return (
+            f"{_THRESHOLD_WARNING_PREFIX}{percentage:.2f}% exceeds "
+            f"{thresholds.increase}% increase threshold"
+        )
+    if percentage < -thresholds.decrease:
+        return (
+            f"{_THRESHOLD_WARNING_PREFIX}{percentage:.2f}% exceeds "
+            f"{thresholds.decrease}% decrease threshold"
+        )
+    return None
 
 
 def apply_price_warnings(
     candidates: Sequence[UpdateCandidate],
     *,
-    suspicious_percent_threshold: Decimal = DEFAULT_SUSPICIOUS_PERCENT_THRESHOLD,
+    thresholds: PriceThresholds = PriceThresholds(),
     conflicted_row_numbers: AbstractSet[int] | None = None,
 ) -> list[UpdateCandidate]:
     """Return candidates with validation warnings attached (immutable copies).
 
-    A change within the threshold gets no warning, so an untouched matched row
+    A change within both thresholds (boundaries included) gets no warning, so an untouched matched row
     is approved automatically (see :func:`is_exportable`). A warning only asks
     for explicit approval: it never turns into an exclusion, which stays the
     user's own choice.
@@ -98,15 +135,10 @@ def apply_price_warnings(
             warnings.append(IDENTITY_CONFLICT_WARNING)
         if candidate.new_price is not None and candidate.new_price <= 0:
             warnings.append(NON_POSITIVE_PRICE_WARNING)
-        if (
-            candidate.status == MatchStatus.MATCHED
-            and candidate.percentage_change is not None
-            and abs(candidate.percentage_change) > suspicious_percent_threshold
-        ):
-            warnings.append(
-                f"{_THRESHOLD_WARNING_PREFIX}{candidate.percentage_change:.2f}% exceeds "
-                f"{suspicious_percent_threshold}% threshold"
-            )
+        if candidate.status == MatchStatus.MATCHED:
+            change_warning = _threshold_warning(candidate.percentage_change, thresholds)
+            if change_warning:
+                warnings.append(change_warning)
         if (
             candidate.status == MatchStatus.MATCHED
             and candidate.old_price == 0
@@ -118,6 +150,34 @@ def apply_price_warnings(
         unique = list(dict.fromkeys(warnings))
         enriched.append(candidate.model_copy(update={"warnings": unique}))
     return enriched
+
+
+def reevaluate_price_thresholds(
+    candidates: Sequence[UpdateCandidate],
+    *,
+    thresholds: PriceThresholds,
+    conflicted_row_numbers: AbstractSet[int] | None = None,
+) -> list[UpdateCandidate]:
+    """Re-check warnings after the thresholds changed; nothing is re-matched.
+
+    A manual approval stays only if the row already needed one: an approval
+    given while the change raised no warning does not cover a warning the new
+    thresholds add, so that row goes back to waiting for approval. Exclusions
+    and every other decision are kept as they are.
+    """
+    rechecked = apply_price_warnings(
+        candidates, thresholds=thresholds, conflicted_row_numbers=conflicted_row_numbers
+    )
+    out: list[UpdateCandidate] = []
+    for before, after in zip(candidates, rechecked):
+        if (
+            after.review_decision == ReviewDecision.APPROVE
+            and _needs_change_approval(after)
+            and not _needs_change_approval(before)
+        ):
+            after = after.model_copy(update={"review_decision": ReviewDecision.INCLUDE})
+        out.append(after)
+    return out
 
 
 _BASIS_PREFIX = "price basis:"

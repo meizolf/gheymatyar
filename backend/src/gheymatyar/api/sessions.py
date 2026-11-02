@@ -243,13 +243,8 @@ def run_match(
     service: ProcessingService = Depends(get_processing_service),
     db: Session = Depends(get_db_session),
 ) -> CandidatesResponse:
-    threshold_override = (
-        body.suspicious_percent_threshold if body is not None else None
-    )
     try:
-        session = service.run_matching(
-            session_id, db, suspicious_percent_threshold=threshold_override
-        )
+        session = service.run_matching(session_id, db)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="session not found") from exc
     except UnsupportedSupplierError as exc:

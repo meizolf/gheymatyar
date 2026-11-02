@@ -164,17 +164,14 @@ export const api = {
     )
   },
 
-  runMatch: (sessionId: string, suspiciousPercentThreshold?: string) =>
+  // Matching uses the saved warning thresholds (see Settings).
+  runMatch: (sessionId: string) =>
     requestJson<CandidatesResponse>(
       `/sessions/${encodeURIComponent(sessionId)}/match`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          suspiciousPercentThreshold
-            ? { suspicious_percent_threshold: suspiciousPercentThreshold }
-            : {},
-        ),
+        body: JSON.stringify({}),
       },
     ),
 
