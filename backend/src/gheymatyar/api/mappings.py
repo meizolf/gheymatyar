@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import json
+from datetime import date
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from gheymatyar.api.deps import get_db_session
 from gheymatyar.api.schemas import (
+    MappingImportItem,
+    MappingImportResponse,
     MappingResponse,
     MappingsListResponse,
     MappingUpdateRequest,
@@ -19,6 +25,14 @@ from gheymatyar.repositories.mapping_repository import UNSET, MappingRepository
 from gheymatyar.repositories.records import ProductMappingRecord, SupplierRecord
 from gheymatyar.repositories.product_decision_repository import ProductDecisionRepository
 from gheymatyar.repositories.supplier_repository import SupplierRepository
+from gheymatyar.services.mapping_transfer import (
+    MAX_IMPORT_BYTES,
+    MappingImportError,
+    apply_import,
+    export_document,
+    plan_import,
+    summarize,
+)
 from gheymatyar.services.mapping_uniqueness import (
     MAPPING_WRITE_LOCK,
     DuplicateMappingTargetError,
@@ -175,3 +189,75 @@ def delete_mapping(
         raise HTTPException(status_code=404, detail="mapping not found") from exc
     except SQLAlchemyError as exc:
         raise HTTPException(status_code=500, detail="could not save the decision") from exc
+
+
+# Records listed back to the user; identical and new ones are only counted.
+_IMPORT_ITEMS_LIMIT = 1000
+
+
+def _read_upload(file: UploadFile) -> bytes:
+    raw = file.file.read(MAX_IMPORT_BYTES + 1)
+    if len(raw) > MAX_IMPORT_BYTES:
+        raise HTTPException(status_code=400, detail="mapping file is too large")
+    return raw
+
+
+def _import_response(plan, *, applied: bool) -> MappingImportResponse:
+    items = [
+        MappingImportItem(**item.to_dict())
+        for item in plan
+        if item.status in {"conflict", "invalid", "replace"}
+    ]
+    return MappingImportResponse(
+        applied=applied,
+        total=len(plan),
+        counts=summarize(plan),
+        items=items[:_IMPORT_ITEMS_LIMIT],
+    )
+
+
+@router.get("/mappings/export")
+def export_mappings(db: Session = Depends(get_db_session)) -> JSONResponse:
+    """All saved mappings of all suppliers as one portable UTF-8 JSON file."""
+    filename = f"gheymatyar-mappings-{date.today().isoformat()}.json"
+    return JSONResponse(
+        export_document(db),
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/mappings/import/preview", response_model=MappingImportResponse)
+def preview_mapping_import(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db_session),
+) -> MappingImportResponse:
+    """Classify the file against the saved mappings. Writes nothing."""
+    try:
+        plan = plan_import(db, _read_upload(file))
+    except MappingImportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _import_response(plan, applied=False)
+
+
+@router.post("/mappings/import", response_model=MappingImportResponse)
+def confirm_mapping_import(
+    file: UploadFile = File(...),
+    replace: str = Form("[]"),
+    db: Session = Depends(get_db_session),
+) -> MappingImportResponse:
+    """Insert new mappings and the conflicts the user chose to replace."""
+    try:
+        chosen = json.loads(replace)
+        if not isinstance(chosen, list) or not all(
+            isinstance(i, int) and not isinstance(i, bool) for i in chosen
+        ):
+            raise ValueError
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="replace must be a list of record numbers") from exc
+    try:
+        plan = apply_import(db, _read_upload(file), replace=chosen)
+    except MappingImportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=500, detail="could not save the decision") from exc
+    return _import_response(plan, applied=True)

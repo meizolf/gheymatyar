@@ -184,6 +184,31 @@ export interface Mapping {
   conflicts_with?: string[]
 }
 
+export type MappingImportStatus = 'new' | 'identical' | 'conflict' | 'invalid' | 'replace'
+
+/** A file record that needs attention: a conflict, an invalid record, or a replacement. */
+export interface MappingImportItem {
+  index: number
+  status: MappingImportStatus
+  supplier_key: string | null
+  supplier_name: string | null
+  pioneers_name: string | null
+  pioneers_code: string | null
+  /** Conflict kind (`mapped_elsewhere`, `target_taken`) or why a record is invalid. */
+  reason: string | null
+  existing_pioneers_name: string | null
+  existing_pioneers_code: string | null
+  holder: string | null
+  replaceable: boolean
+}
+
+export interface MappingImportResponse {
+  applied: boolean
+  total: number
+  counts: Record<MappingImportStatus, number>
+  items: MappingImportItem[]
+}
+
 export interface MappingsListResponse {
   supplier_key: string
   mappings: Mapping[]

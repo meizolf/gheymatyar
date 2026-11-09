@@ -7,6 +7,7 @@ import type {
   ExcelDownload,
   ExportResponse,
   Mapping,
+  MappingImportResponse,
   MappingsListResponse,
   ProductSearchResponse,
   SessionCreateResponse,
@@ -109,6 +110,39 @@ export const api = {
       `/suppliers/${encodeURIComponent(supplierKey)}/mappings/${mappingId}`,
       { method: 'DELETE' },
     ),
+
+  /** Every saved mapping of every supplier as one JSON file. */
+  exportMappings: async (): Promise<{ blob: Blob; filename: string }> => {
+    const response = await fetch(`${API_BASE}/mappings/export`)
+    if (!response.ok) {
+      throw await parseError(response)
+    }
+    const disposition = response.headers.get('Content-Disposition') ?? ''
+    const filename =
+      /filename="([^"]+)"/.exec(disposition)?.[1] ?? 'gheymatyar-mappings.json'
+    return { blob: await response.blob(), filename }
+  },
+
+  /** Classify a mappings file against the saved ones; writes nothing. */
+  previewMappingImport: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return requestJson<MappingImportResponse>('/mappings/import/preview', {
+      method: 'POST',
+      body: form,
+    })
+  },
+
+  /** Insert new mappings and replace only the chosen conflicts. */
+  confirmMappingImport: (file: File, replace: number[]) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('replace', JSON.stringify(replace))
+    return requestJson<MappingImportResponse>('/mappings/import', {
+      method: 'POST',
+      body: form,
+    })
+  },
 
   createSession: () =>
     requestJson<SessionCreateResponse>('/sessions', { method: 'POST' }),

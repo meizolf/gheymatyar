@@ -265,6 +265,26 @@ const PATTERNS: Array<{ re: RegExp; fa: string | ((m: RegExpMatchArray) => strin
     fa: 'آستانه هشدار تغییر قیمت باید یک عدد مثبت معتبر باشد.',
   },
   {
+    re: /mapping file is too large/i,
+    fa: 'فایل نگاشت‌ها بیش از حد بزرگ است.',
+  },
+  {
+    re: /mapping file is not valid UTF-8 JSON/i,
+    fa: 'فایل نگاشت‌ها JSON معتبر نیست.',
+  },
+  {
+    re: /file is not a GheymatYar mappings export/i,
+    fa: 'این فایل خروجی نگاشت‌های قیمت‌یار نیست.',
+  },
+  {
+    re: /unsupported mapping schema version|mapping file has no schema version/i,
+    fa: 'نسخهٔ فایل نگاشت‌ها پشتیبانی نمی‌شود.',
+  },
+  {
+    re: /mapping file has no mappings list|mapping file has too many records/i,
+    fa: 'ساختار فایل نگاشت‌ها معتبر نیست.',
+  },
+  {
     re: /supplier is not set on this session/i,
     fa: 'تأمین‌کننده برای این جلسه تنظیم نشده است.',
   },

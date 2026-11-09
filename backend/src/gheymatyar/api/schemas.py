@@ -213,6 +213,29 @@ class MappingsListResponse(BaseModel):
     mappings: list[MappingResponse]
 
 
+class MappingImportItem(BaseModel):
+    """One file record that needs attention (conflict, invalid, or replaced)."""
+
+    index: int
+    status: str
+    supplier_key: str | None = None
+    supplier_name: str | None = None
+    pioneers_name: str | None = None
+    pioneers_code: str | None = None
+    reason: str | None = None
+    existing_pioneers_name: str | None = None
+    existing_pioneers_code: str | None = None
+    holder: str | None = None
+    replaceable: bool = False
+
+
+class MappingImportResponse(BaseModel):
+    applied: bool
+    total: int
+    counts: dict[str, int]
+    items: list[MappingImportItem]
+
+
 class MappingUpdateRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
