@@ -36,6 +36,8 @@ PARS_PLAST_HTML = FIXTURES / "suppliers" / "parsplast_website_1405_08_05.html"
 KAVEH_TEXT_PDF = FIXTURES / "suppliers" / "kaveh_gostar_threaded_1405_06.pdf"
 IRANIAN_PDF = FIXTURES / "suppliers" / "iranian_fittings_1405_07_28.pdf"
 ZACO_PDF = FIXTURES / "suppliers" / "zaco_foreign_fittings_1405_07_28.pdf"
+SAHARGAS_PDF = FIXTURES / "suppliers" / "sahargas_9_1405_07_28.pdf"
+TEXA_PDF = FIXTURES / "suppliers" / "texa_f46_1405_07_14.pdf"
 
 
 @pytest.fixture

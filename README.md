@@ -102,9 +102,14 @@ Only `نرخ فروش اصلی` is written, and only on rows the user has explic
 | `newpipe` | نیوپایپ | Printed Rial, 10% VAT included. Package length is not multiplied. Same name with different prices is blocked. |
 | `abrahan_pipe` | آبراهان | Printed cash Rial. `موجود` rows are skipped. VAT is not stated. |
 | `kian` | کیان | Printed Toman → Rial with a single `× 10`. Package quantity is not multiplied. |
+| `kaveh_gostar` | کاوه گستر | Printed Rial from the 7-page text list. Columns are found by header; pack and bolt counts are not multiplied. «*» cells are skipped. |
+| `iranian_fittings` | اتصالات ایرانی | Printed cash Rial, one-page matrix (product × inch size). Reducer rows give row × column sizes. |
+| `zaco_foreign_fittings` | اتصالات زاکو و خارجی | Printed cash Rial, one-page matrix plus mixed rows and the «اتصالات سیاه» section. Names keep the list's «زاکو و خارجی». |
+| `sahargas` | سحرگاز | Printed Rial, five tables on one page. Each priced construction (مانیسمان, درزدار سنگین/استاندارد, سبک, …) is its own product. Sizes come from the size code column. PCS is not multiplied; «توافقی» and zero cells are skipped. |
+| `texa` | صنایع شیرسازی تکسا | Printed Rial with «/» thousands (10/970/000). Codes repeat across products, so names identify products; spare parts on page 3 have no code. Dashed prices are skipped; carton count and weight are not multiplied. |
 | `pars_plast` | پارس پلاست | **Website**, not PDF: fetched from the official parsplast.co price list only when the user presses «دریافت قیمت از سایت». All six categories are read. Prices are printed Rial, never ×10 and never × pack quantity. Rows marked «استعلام قیمت» or «به زودی» are excluded. Website codes repeat across products, so each product is identified by its full name (brand, product, family, size) and the code is kept only as reference. The page structure is validated before any price is accepted, and the fetched page is kept as the session snapshot. |
 
-PG 234 (Polymer Golpayegan) and Kaveh Gostar are **not supported**, and Pars Plast **PDFs** stay unsupported (its prices come from its website instead). Their pages are image-only or the embedded font does not expose the printed prices. Offline Persian OCR is not bundled, and Windows offline OCR has not been verified, so those keys stay unregistered and return HTTP 400.
+PG 234 (Polymer Golpayegan) and the scanned Kaveh Gostar list are **not supported**, and Pars Plast **PDFs** stay unsupported (its prices come from its website instead). Their pages are image-only or the embedded font does not expose the printed prices. Offline Persian OCR is not bundled, and Windows offline OCR has not been verified, so PG 234 stays unregistered and returns HTTP 400, and a scanned Kaveh Gostar PDF is refused when it is confirmed.
 
 Windows onedir packaging and import of the updated workbook into the Pioneers desktop app are not verified from this macOS tree.
 

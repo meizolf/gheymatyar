@@ -24,6 +24,8 @@ from gheymatyar.suppliers.kaveh_gostar import KavehGostarProcessor
 from gheymatyar.suppliers.kian import KianProcessor
 from gheymatyar.suppliers.newpipe import NewPipeProcessor
 from gheymatyar.suppliers.pars_plast import ParsPlastWebsiteProcessor
+from gheymatyar.suppliers.sahargas import SahargasProcessor
+from gheymatyar.suppliers.texa import TexaProcessor
 from gheymatyar.suppliers.top_industrial import TopIndustrialProcessor
 
 __all__ = [
@@ -131,6 +133,8 @@ def get_default_registry() -> SupplierProcessorRegistry:
         registry.register(KavehGostarProcessor())
         registry.register(IranianFittingsProcessor())
         registry.register(ZacoForeignFittingsProcessor())
+        registry.register(SahargasProcessor())
+        registry.register(TexaProcessor())
         # Website-only: its PDFs are scanned images (see pars_plast.py).
         registry.register(ParsPlastWebsiteProcessor())
         _DEFAULT = registry
