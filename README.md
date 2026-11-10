@@ -99,7 +99,7 @@ Only `نرخ فروش اصلی` is written, and only on rows the user has explic
 | `azin_pipe` | آذین لوله | Printed Rial, 10% VAT included. Direct replacement. |
 | `top_industrial` | گروه صنعتی تاپ | Printed Toman → Rial with `× 10` (e.g. 3,240,000 Toman → 32,400,000 Rial). Carton qty not multiplied. |
 | `dina_polymer` | دینا پلیمر | Printed Rial. Pipe/drip prices stay per meter; fittings per piece. Fitting `#N/A` column is the price; drip table uses labeled `قیمت` (not adjacent `#N/A`). |
-| `newpipe` | نیوپایپ | Printed Rial, 10% VAT included. Package length is not multiplied. Same name with different prices is blocked. |
+| `newpipe` | نیوپایپ | Pipe/fitting list and the two-page accessories list (ملزومات, recognized by its title plus «نیوباکس»). Printed Rial, 10% VAT included. Package length and box/carton counts are not multiplied. Same name with different prices is blocked. |
 | `abrahan_pipe` | آبراهان | Printed cash Rial. `موجود` rows are skipped. VAT is not stated. |
 | `kian` | کیان | Printed Toman → Rial with a single `× 10`. Package quantity is not multiplied. |
 | `kaveh_gostar` | کاوه گستر | Printed Rial from the 7-page text list. Columns are found by header; pack and bolt counts are not multiplied. «*» cells are skipped. |

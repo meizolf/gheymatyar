@@ -7,6 +7,12 @@ a carton) are not prices and are not multiplied.
 
 The footer states that listed Rial prices already include 10% VAT. Those
 amounts are used as printed. No extra tax is added.
+
+The same supplier also publishes a two-page accessories list («لیست قیمت
+ملزومات سیستم لوله کشی تاسیسات پلیمری», Gitikala/SGP branded) with two
+tables side by side under red section headings. Its text layer is in
+logical order, so it is read from PyMuPDF characters placed into cells by
+position under the header row; see :func:`_accessory_rows`.
 """
 
 from __future__ import annotations
@@ -194,6 +200,144 @@ def _clean_size(raw: str) -> tuple[str | None, str | None]:
     return (text or None), None
 
 
+# --- Accessories list ------------------------------------------------------
+#: Title of the accessories list. Identity needs it *and* the NewPipe
+#: «نیوباکس» heading: Gitikala/SGP branding alone is shared with other lists.
+ACCESSORIES_TITLE = "ملزومات سیستم لوله کشی تاسیسات پلیمری"
+ACCESSORIES_HEADING = "نیوباکس"
+_HEADING_RED = 0xC00000
+_ACC_HEADERS = {
+    "price": "قیمت(ریال)",
+    "carton": "تعداد در کارتن",
+    "box": "تعداد در جعبه",
+    "image": "تصویر",
+}
+_ACC_CODE_RE = re.compile(r"\d{9}")
+# The lam-alef ligature is extracted as «ال» in this list's font.
+_ACC_FIXES = (("پالستیک", "پلاستیک"), ("اقالم", "اقلام"))
+_ROW_TOLERANCE = 18  # points; rows are ~39 pt apart
+
+
+def _acc_text(raw: str) -> str:
+    """Clean one accessories cell: glyph fixes, spacing, inch marks, dashes."""
+    text = polish_persian(raw)
+    for src, dst in _ACC_FIXES:
+        text = text.replace(src, dst)
+    text = re.sub(r"[\u064B-\u0652]", "", text)  # harakat («اُرینگ»)
+    text = re.sub(r'["″()]', " ", text)
+    # «تخت50» → «تخت 50», «قطرM8» → «قطر M8».
+    text = re.sub(
+        r"(?<=[\u0600-\u06FF])(?=[A-Za-z\d])|(?<=[A-Za-z\d])(?=[\u0600-\u06FF])", " ", text
+    )
+    # Separator dashes («شکل - 49x27»), not joined codes such as «WT-D».
+    text = re.sub(r"(?<!\S)-|-(?!\S)", " ", text)
+    text = re.sub(r"(\d)\s+mm\b", r"\1mm", text)
+    text = " ".join(text.split()).strip(" -")
+    # A whole inch drawn left of its fraction is stored after it: «1/4 1» → «1 1/4».
+    mixed = re.fullmatch(r"(\d+/\d+) (\d+)", text)
+    if mixed:
+        text = f"{mixed.group(2)} {mixed.group(1)}"
+    return text
+
+
+def _accessory_rows(page: Any, page_number: int) -> list[dict[str, Any]]:
+    """Rows of both tables on one accessories page: right table first."""
+    spans = [
+        span
+        for block in page.get_text("rawdict")["blocks"]
+        for line in block.get("lines", [])
+        for span in line["spans"]
+        if "".join(c["c"] for c in span["chars"]).strip()
+    ]
+
+    def text_of(span: dict) -> str:
+        return "".join(c["c"] for c in span["chars"])
+
+    headers = {
+        key: sorted(
+            (s["bbox"] for s in spans if text_of(s).strip().startswith(label)),
+            key=lambda bbox: bbox[0],
+        )
+        for key, label in _ACC_HEADERS.items()
+    }
+    if any(len(boxes) != 2 for boxes in headers.values()):
+        raise SupplierPdfError(
+            f"NewPipe accessories page {page_number}: table header not recognized"
+        )
+    header_bottom = max(box[3] for boxes in headers.values() for box in boxes)
+    tables = []
+    for side in (0, 1):  # 0 = left table, 1 = right table
+        tables.append({
+            "left": 0.0 if side == 0 else headers["image"][0][2],
+            "carton": headers["carton"][side][0] - 3,
+            "box": headers["box"][side][0] - 3,
+            "size": headers["box"][side][2] + 2,
+            "right": headers["image"][side][0],
+        })
+
+    def table_at(x: float) -> int | None:
+        for side, table in enumerate(tables):
+            if table["left"] <= x < table["right"]:
+                return side
+        return None
+
+    def mid(bbox) -> tuple[float, float]:
+        return (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
+
+    # Each product row is anchored on its nine-digit code cell.
+    rows: list[dict[str, Any]] = []
+    for span in spans:
+        x, y = mid(span["bbox"])
+        side = table_at(x)
+        code = text_of(span).strip()
+        if (
+            span["color"] == 0 and side is not None and y > header_bottom
+            and x > tables[side]["size"] and _ACC_CODE_RE.fullmatch(code)
+        ):
+            rows.append({"side": side, "y": y, "code": code, "x0": span["bbox"][0],
+                         "cells": {"price": "", "carton": "", "box": "", "size": ""}})
+    for side, table in enumerate(tables):
+        starts = [row["x0"] for row in rows if row["side"] == side]
+        table["code"] = (min(starts) if starts else table["right"]) - 3
+
+    headings: list[tuple[int, float, str]] = []
+    for span in spans:
+        x, y = mid(span["bbox"])
+        side = table_at(x)
+        if side is None or y <= header_bottom:
+            continue
+        if span["color"] == _HEADING_RED:
+            # «چسب فشار قوی» + «PVC» are two spans on one line.
+            if headings and headings[-1][0] == side and abs(headings[-1][1] - y) < 10:
+                headings[-1] = (side, headings[-1][1], headings[-1][2] + " " + text_of(span))
+            else:
+                headings.append((side, y, text_of(span)))
+            continue
+        if span["color"] != 0:
+            continue
+        table = tables[side]
+        for char in span["chars"]:
+            cx, cy = mid(char["bbox"])
+            if cx >= table["code"] or cx < table["left"]:
+                continue
+            column = (
+                "price" if cx < table["carton"]
+                else "carton" if cx < table["box"]
+                else "box" if cx < table["size"]
+                else "size"
+            )
+            near = [r for r in rows if r["side"] == side and abs(r["y"] - cy) <= _ROW_TOLERANCE]
+            if near:
+                row = min(near, key=lambda r: abs(r["y"] - cy))
+                row["cells"][column] += char["c"]
+
+    for row in rows:
+        above = [h for h in headings if h[0] == row["side"] and h[1] < row["y"]]
+        row["section"] = _acc_text(max(above, key=lambda h: h[1])[2]) if above else None
+        row["page"] = page_number
+    return sorted(rows, key=lambda r: (-r["side"], r["y"]))
+
+
 def _persian_words(text: str) -> int:
     return len(re.findall(r"[\u0600-\u06FF]{2,}", text))
 
@@ -210,6 +354,7 @@ class NewPipeProcessor(BaseSupplierProcessor):
             strong_markers=("نیوپایپ", "پیاپوین"),
             weak_markers=("لوله پنج لایه", "اتصالات پنج لایه", "گیتی کالا"),
             websites=(),
+            strong_marker_sets=((ACCESSORIES_TITLE, ACCESSORIES_HEADING),),
         )
 
     def parse_pdf(self, path: str | Path) -> SupplierParseResult:
@@ -221,6 +366,7 @@ class NewPipeProcessor(BaseSupplierProcessor):
         warnings: list[str] = []
         seen_codes: set[str] = set()
         vat_seen = False
+        accessories = False
         page_count = 0
         try:
             probed = pymupdf.open(source)
@@ -230,31 +376,42 @@ class NewPipeProcessor(BaseSupplierProcessor):
                     probe_text = probe_page.get_text("text") or ""
                     if "مالیات" in probe_text and "ارزش افزوده" in probe_text:
                         vat_seen = True
+                    accessories = accessories or ACCESSORIES_TITLE in probe_text
+                if accessories:
+                    for page_index, probe_page in enumerate(probed):
+                        page_items, page_warnings = self._accessory_items(
+                            _accessory_rows(probe_page, page_index + 1),
+                            seen_codes=seen_codes,
+                            vat_included=vat_seen,
+                        )
+                        items.extend(page_items)
+                        warnings.extend(page_warnings)
             finally:
                 probed.close()
-            with pdfplumber.open(source) as doc:
-                page_count = len(doc.pages)
-                if page_count == 0:
-                    raise SupplierPdfError("PDF has no pages")
-                first = doc.pages[0].extract_text() or ""
-                if "نیوپایپ" not in first and "پیاپوین" not in first:
-                    warnings.append(
-                        "PDF does not clearly identify as نیوپایپ; "
-                        "parsing will still be attempted"
-                    )
-                for page_index, page in enumerate(doc.pages):
-                    tables = page.extract_tables() or []
-                    if not tables:
-                        warnings.append(f"page {page_index + 1}: no table detected")
-                        continue
-                    page_items, page_warnings = self._parse_table(
-                        tables[0],
-                        page_number=page_index + 1,
-                        seen_codes=seen_codes,
-                        vat_included=vat_seen,
-                    )
-                    items.extend(page_items)
-                    warnings.extend(page_warnings)
+            if not accessories:
+                with pdfplumber.open(source) as doc:
+                    page_count = len(doc.pages)
+                    if page_count == 0:
+                        raise SupplierPdfError("PDF has no pages")
+                    first = doc.pages[0].extract_text() or ""
+                    if "نیوپایپ" not in first and "پیاپوین" not in first:
+                        warnings.append(
+                            "PDF does not clearly identify as نیوپایپ; "
+                            "parsing will still be attempted"
+                        )
+                    for page_index, page in enumerate(doc.pages):
+                        tables = page.extract_tables() or []
+                        if not tables:
+                            warnings.append(f"page {page_index + 1}: no table detected")
+                            continue
+                        page_items, page_warnings = self._parse_table(
+                            tables[0],
+                            page_number=page_index + 1,
+                            seen_codes=seen_codes,
+                            vat_included=vat_seen,
+                        )
+                        items.extend(page_items)
+                        warnings.extend(page_warnings)
         except SupplierPdfError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -290,6 +447,65 @@ class NewPipeProcessor(BaseSupplierProcessor):
 
     def normalize_supplier_name(self, name: str) -> str:
         return normalize_product_name(name)
+
+    def _accessory_items(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        seen_codes: set[str],
+        vat_included: bool,
+    ) -> tuple[list[SupplierPriceItem], list[str]]:
+        """Accessories rows → items named «نیوپایپ <heading> <size/variant>»."""
+        items: list[SupplierPriceItem] = []
+        warnings: list[str] = []
+        for row in rows:
+            code, page, cells = row["code"], row["page"], row["cells"]
+            if code in seen_codes:
+                warnings.append(f"page {page}: duplicate supplier code {code} skipped")
+                continue
+            price_raw = cells["price"].strip()
+            price = parse_grouped_amount(price_raw)
+            if price is None:
+                warnings.append(f"page {page}: unreadable price for code {code} ({price_raw!r})")
+                continue
+            size = _acc_text(cells["size"])
+            box = _acc_text(cells["box"])
+            # «2 متری», «مایع تیوپی 200cc» describe the product; plain counts do not.
+            detail = " ".join(part for part in (size, box if contains_arabic(box) else "") if part)
+            section = row["section"]
+            parts = [section] if section and section not in detail else []
+            parts.append(detail)
+            label = " ".join(part for part in parts if part)
+            if not label:
+                warnings.append(f"page {page}: missing name for code {code}; row skipped")
+                continue
+            seen_codes.add(code)
+            items.append(
+                SupplierPriceItem(
+                    supplier_id=self.supplier_key,
+                    supplier_code=code,
+                    supplier_name=f"{SUPPLIER_DISPLAY_NAME} {label}",
+                    price=price,
+                    unit=None,
+                    raw_values={
+                        "currency": PIONEERS_SALE_CURRENCY,
+                        "original_currency": PIONEERS_SALE_CURRENCY,
+                        "original_price": str(price),
+                        "original_price_text": price_raw,
+                        "price_basis": PRICE_BASIS_PRINTED,
+                        "tax": "included_10_percent" if vat_included else "not_stated",
+                        "page": page,
+                        "column": "right" if row["side"] == 1 else "left",
+                        "section": section,
+                        "size": size or None,
+                        "package_quantity": box or None,
+                        "carton_quantity": _acc_text(cells["carton"]) or None,
+                        "review_warnings": [],
+                        "pricing_blockers": [],
+                    },
+                )
+            )
+        return items, warnings
 
     def _parse_table(
         self,

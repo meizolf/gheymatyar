@@ -94,7 +94,7 @@ class BaseSupplierProcessor(ABC):
         """
         body = text if text is not None else self.read_pdf_identity_text(path)
         rules = self.detection_rules()
-        if not rules.strong_markers:
+        if not rules.strong_markers and not rules.strong_marker_sets:
             raise SupplierPdfError(
                 f"supplier {self.supplier_key!r} has no identity markers configured"
             )

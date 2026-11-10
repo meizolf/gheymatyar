@@ -51,6 +51,9 @@ class DetectionRules:
     #: Counted only when at least one strong marker also matches.
     supporting_markers: Sequence[str] = ()
     websites: Sequence[str] = ()
+    #: Strong identity only when every marker of one set is present, e.g. a
+    #: document title plus a product heading that alone would be too generic.
+    strong_marker_sets: Sequence[Sequence[str]] = ()
 
 
 @dataclass(frozen=True)
@@ -184,6 +187,11 @@ def matching_strong_markers(text: str, rules: DetectionRules) -> list[str]:
         for marker in rules.strong_markers
         if _marker_in_text(marker, text, folded)
     ]
+    hits.extend(
+        " + ".join(markers)
+        for markers in rules.strong_marker_sets
+        if markers and all(_marker_in_text(m, text, folded) for m in markers)
+    )
     return _dedupe_overlapping_markers(hits)
 
 
